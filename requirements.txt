@@ -1,0 +1,55 @@
+# ==============================================================================
+# Requirements — train-rtmdet
+# Hardware: NVIDIA RTX 4090  |  CUDA 11.8  |  PyTorch 2.1
+#
+# NOTE: CUDA 11.8 is used instead of 12.x because OpenMMLab does not publish
+# mmcv binary wheels for Windows on CUDA 12.x.  The RTX 4090 runs CUDA 11.8
+# without any performance penalty.
+#
+# Install order (run from the repo root with the target conda/venv active):
+#
+#   Step 1 — all pip-installable packages (torch, mmengine, onnx, …):
+#       pip install -r requirements.txt
+#
+#   Step 2 — MMDetection (local clone):
+#       pip install -e mmdetection/
+#
+#   Step 3 — this package:
+#       pip install -e .
+# ==============================================================================
+
+
+# ── PyTorch GPU — CUDA 11.8 ───────────────────────────────────────────────────
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.1.0+cu118
+torchvision==0.16.0+cu118
+torchaudio==2.1.0+cu118
+
+
+# ── OpenMMLab core ────────────────────────────────────────────────────────────
+mmengine>=0.10.0,<1.0
+setuptools==68.2.2              # torch 2.1 uses pkg_resources (removed in setuptools 70+)
+
+# mmcv is not on PyPI as a Windows binary.  The wheel is served from the OpenMMLab CDN.
+# The find-links URL encodes the exact (CUDA, Torch) pair — keep in sync with torch above.
+--find-links https://download.openmmlab.com/mmcv/dist/cu118/torch2.1.0/index.html
+mmcv==2.1.0
+
+# mmdet is installed from the local clone in step 2 above.
+
+
+# ── ONNX export & validation ──────────────────────────────────────────────────
+onnx>=1.16.0
+onnxruntime-gpu>=1.18.0   # GPU-accelerated ONNX inference (replaces onnxruntime CPU)
+onnx-simplifier>=0.4.36   # graph simplification used during export
+
+
+# ── Image / data processing ───────────────────────────────────────────────────
+numpy>=1.24,<2.0           # numpy 2.x breaks several mmdet/mmcv ops
+opencv-python-headless>=4.8.0
+Pillow>=10.0
+scipy>=1.11
+
+
+# ── Config / utilities ────────────────────────────────────────────────────────
+pyyaml>=6.0

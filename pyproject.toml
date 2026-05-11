@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "train-rtmdet"
+version = "0.1.0"
+description = "Fine-tuning and export pipeline for RTMDet object detection models"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyyaml",
+]
+
+[project.scripts]
+normalize-dataset = "train_rtmdet.normalize:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["train_rtmdet*"]

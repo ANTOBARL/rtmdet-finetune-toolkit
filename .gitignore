@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+
+# folders
+mmdeploy/
+mmdetection/
+.claude/
+datasets/
+runs/
+models/

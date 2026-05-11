@@ -1,0 +1,50 @@
+"""
+Step 1 of 2 — Normalize dataset filenames.
+
+Renames images and labels in all splits (train/valid/test) to a canonical
+format:  train_1.jpg / train_1.txt,  val_1.jpg / val_1.txt, etc.
+
+Usage:
+    python normalize_dataset.py
+
+dataset_path is read from iperparameter_config.txt.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from train_rtmdet.config_loader import load_pipeline_config
+from train_rtmdet.normalize import build_rename_plan, execute_rename_plan, print_plan
+
+
+def main() -> None:
+    config_path = Path(__file__).resolve().parent / "iperparameter_config.txt"
+    cfg = load_pipeline_config(config_path)
+
+    dataset_path = cfg.get("dataset_path")
+    if dataset_path is None:
+        raise ValueError(
+            "dataset_path is not set in iperparameter_config.txt. "
+            "Edit the [dataset] section before running."
+        )
+
+    dataset_root = Path(dataset_path).resolve()
+    if not dataset_root.is_dir():
+        raise FileNotFoundError(f"Dataset folder not found: {dataset_root}")
+
+    print(f"Dataset: {dataset_root}")
+
+    rename_plan, warnings = build_rename_plan(dataset_root, label_prefix="")
+    print_plan(rename_plan, warnings)
+
+    if not rename_plan:
+        print("All filenames are already normalized — nothing to do.")
+        return
+
+    execute_rename_plan(rename_plan)
+    print(f"\nDone — {len(rename_plan)} files renamed.")
+
+
+if __name__ == "__main__":
+    main()
