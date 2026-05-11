@@ -886,6 +886,24 @@ def find_mmdet_tool(config: RTMDetPipelineConfig, tool_name: str) -> Path:
     return tool_path
 
 
+_SUPPRESS_INLINE = (
+    " paramwise_options --",
+    '"FileClient" will be deprecated',
+    '"HardDiskBackend" is the alias',
+    " is duplicate. It is skipped",
+)
+
+_BLOCK_STARTS = (
+    " - INFO - Config:",
+    " - INFO - Hooks will be executed in the following order:",
+)
+
+_BLOCK_ENDS = (
+    "- INFO - Distributed training",
+    "loading annotations into memory",
+)
+
+
 def run_command(command: list, cwd=None) -> None:
     print("\nRunning command:")
     print(" ".join(str(part) for part in command))
@@ -897,12 +915,37 @@ def run_command(command: list, cwd=None) -> None:
         old_pythonpath = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = str(cwd) + (os.pathsep + old_pythonpath if old_pythonpath else "")
 
-    subprocess.run(
+    proc = subprocess.Popen(
         command,
         cwd=str(cwd) if cwd else None,
         env=env,
-        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+        encoding="utf-8",
+        errors="replace",
     )
+
+    in_block = False
+    for line in proc.stdout:
+        text = line.rstrip("\n")
+        if in_block:
+            if any(p in text for p in _BLOCK_ENDS):
+                in_block = False
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            continue
+        if any(p in text for p in _BLOCK_STARTS):
+            in_block = True
+            continue
+        if any(p in text for p in _SUPPRESS_INLINE):
+            continue
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+    proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, command)
 
 
 def verify_training_environment(config: RTMDetPipelineConfig) -> None:

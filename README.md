@@ -39,31 +39,61 @@ train_RTM_det/
 
 ---
 
-## External dependencies
+## Installation
 
-These two repositories must be installed separately. They are **not** on PyPI and require manual setup.
+### Prerequisites — clone the OpenMMLab repos
 
-### MMDetection — mandatory for training
+These two repositories must be cloned manually. They are **not** on PyPI.
 
 ```bash
+# from the repo root
 git clone https://github.com/open-mmlab/mmdetection.git
-cd mmdetection
-pip install -e .
+git clone https://github.com/open-mmlab/mmdeploy.git   # only needed for ONNX export
 ```
 
-After cloning, set `mmdet_root` in `iperparameter_config.txt` to the full path of this folder (the one containing `tools/train.py`).
+After cloning, set the corresponding paths in `iperparameter_config.txt`:
 
-### MMDeploy — required only for ONNX export
+```ini
+[paths]
+mmdet_root    = C:\path\to\train_RTM_det\mmdetection
+mmdeploy_root = C:\path\to\train_RTM_det\mmdeploy
+```
+
+### Python environment
+
+**Tested configuration:** Python 3.11 · CUDA 11.8 · PyTorch 2.1 · Windows (RTX 4090)
+
+> **Why CUDA 11.8 and not 12.x?**
+> OpenMMLab does not publish mmcv binary wheels for Windows on CUDA 12.x, so pip
+> would fall back to building from source (requires a full MSVC + CUDA toolchain).
+> CUDA 11.8 has pre-built Windows wheels and the RTX 4090 runs it without any
+> performance penalty.
+
+> **Why setuptools 68.2.2?**
+> PyTorch 2.1 imports `pkg_resources` from setuptools internally. That module was
+> removed in setuptools 70+, so anything newer breaks the mmdetection install.
+> `requirements.txt` pins this version automatically.
+
+**Step 1 — install all pip dependencies** (torch GPU + mmcv + ONNX tools + rest):
 
 ```bash
-git clone https://github.com/open-mmlab/mmdeploy.git
+pip install -r requirements.txt
 ```
 
-MMDeploy is needed only when `save_onnx_weights = True`. For training alone it is not required. After cloning, set `mmdeploy_root` in `iperparameter_config.txt`.
+`requirements.txt` handles everything: PyTorch CUDA index, mmcv Windows wheel from
+the OpenMMLab CDN, and the setuptools pin — no manual steps required.
 
-### Python package
+**Step 2 — install MMDetection** from the local clone:
 
-Install this package in editable mode so the `train_rtmdet` module is importable:
+```bash
+pip install -e mmdetection/ --no-build-isolation
+```
+
+`--no-build-isolation` is required because mmdetection's `setup.py` imports `torch`
+at build time, which is only available in the current environment, not in pip's
+default isolated build sandbox.
+
+**Step 3 — install this package** in editable mode:
 
 ```bash
 pip install -e .
