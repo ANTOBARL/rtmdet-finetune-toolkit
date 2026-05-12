@@ -28,9 +28,13 @@ train_RTM_det/
 │   ├── dataset/
 │   │   └── prepare_dataset.py          ← optional: convert raw YOLO → RTMDet format
 │   └── export/
-│       ├── export_onnx.py              ← standalone ONNX export (post-training)
-│       ├── export_tensorrt.py          ← IDLE (TensorRT export, future work)
-│       └── benchmark_trt.py            ← IDLE (TensorRT benchmark, future work)
+│       ├── export_onnx/
+│       │   ├── export_config.txt       ← standalone ONNX export config (edit this)
+│       │   └── export_onnx.py          ← standalone ONNX export (post-training)
+│       └── export_tensorrt/
+│           ├── export_config.txt       ← IDLE (TensorRT export config)
+│           ├── export_tensorrt.py      ← IDLE (TensorRT export, future work)
+│           └── benchmark_trt.py        ← IDLE (TensorRT benchmark, future work)
 │
 ├── iperparameter_config.txt            ← all hyperparameters and paths (edit this)
 ├── pyproject.toml
@@ -306,16 +310,21 @@ These parameters define the post-processing baked permanently into the ONNX grap
 To export a checkpoint without re-running training (e.g. to change thresholds):
 
 ```bash
-# edit CHECKPOINT_PATH, SCORE_THRESHOLD, etc. at the top, then:
-python tools/export/export_onnx.py
+# 1. Edit tools/export/export_onnx/export_config.txt
+#    Set project_dir + model_name (or checkpoint_path directly).
+# 2. Run:
+python tools/export/export_onnx/export_onnx.py
 ```
 
-The script auto-detects the MMDetection config and input size from the run manifest (`rtmdet_pipeline_manifest.json`) in the checkpoint folder.
+The script auto-detects the MMDetection config and input size from the run manifest (`rtmdet_pipeline_manifest.json`) in the checkpoint folder. All settings (score threshold, IoU threshold, output size, device, paths) are configured exclusively in `tools/export/export_onnx/export_config.txt` — the main `iperparameter_config.txt` is not read.
 
 ---
 
 ## TensorRT export (future work)
 
-TensorRT export is currently **IDLE**. The script `tools/export/export_tensorrt.py` contains the implementation but is not integrated into the main workflow yet, because it requires hardware-specific setup (TensorRT SDK version, CUDA/cuDNN versions, custom ops build). It will be activated in a future iteration once the target hardware is defined.
+TensorRT export is currently **IDLE**. The scripts in `tools/export/export_tensorrt/` contain the implementation but are not active yet, because they require hardware-specific setup (TensorRT SDK version, CUDA/cuDNN versions, custom ops build for MMDeploy). They will be activated once the target hardware is defined.
 
-The benchmark script `tools/export/benchmark_trt.py` (for running `trtexec` on a Jetson or desktop GPU) is also IDLE for the same reason.
+When ready:
+1. Edit `tools/export/export_tensorrt/export_config.txt`.
+2. Run `python tools/export/export_tensorrt/export_tensorrt.py`.
+3. Benchmark on the target device: `python tools/export/export_tensorrt/benchmark_trt.py`.

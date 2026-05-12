@@ -53,3 +53,4 @@ scipy>=1.11
 
 # ── Config / utilities ────────────────────────────────────────────────────────
 pyyaml>=6.0
+aenum>=3.1.0                   # required by mmdeploy (ONNX/TensorRT export)
