@@ -109,27 +109,30 @@ def run_onnx_export(
     env = os.environ.copy()
     env["PYTHONPATH"] = build_pythonpath(mmdeploy_root, mmdet_root, None)
 
-    print("\n" + "=" * 60)
-    print("STARTING RTMDet -> ONNX EXPORT")
-    print("=" * 60)
-    print(f"  Checkpoint   : {checkpoint_file}")
-    print(f"  Config       : {mmdet_config}")
-    print(f"  Sample image : {sample_image}")
-    print(f"  Input size   : {imgsz}x{imgsz}")
-    print(f"  Device       : {device}")
-    print(f"  Score thr    : {score_threshold}")
-    print(f"  IoU thr      : {iou_threshold}")
-    print(f"  Keep top-k   : {keep_top_k}")
-    print(f"  Output dir   : {output_dir}")
-    print("=" * 60 + "\n")
+    _SUPPRESS = (
+        "Failed to search registry with scope",
+        "TracerWarning",
+        "UserWarning",
+        "DeprecationWarning: get_onnx_config",
+        "Can not optimize model",
+        "warnings.warn(",
+        "  return _VF.meshgrid",
+        "More details: https://",
+    )
 
     result = subprocess.run(
         cmd, env=env, cwd=str(mmdeploy_root),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace",
     )
-    clean_stdout = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout)
-    print(clean_stdout)
+    _ansi = re.compile(r'\x1b\[[0-9;]*m')
+    for raw_line in result.stdout.splitlines():
+        line = _ansi.sub('', raw_line).rstrip()
+        if not line:
+            continue
+        if any(pat in line for pat in _SUPPRESS):
+            continue
+        print(line)
 
     onnx_file = output_dir / "end2end.onnx"
     if result.returncode != 0:
@@ -173,12 +176,15 @@ def validate_onnx(onnx_path: Path, imgsz: int) -> None:
         import numpy as np
         import onnxruntime as ort
 
+        opts = ort.SessionOptions()
+        opts.log_severity_level = 3  # suppress INFO/WARNING from onnxruntime
+
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
         try:
-            sess = ort.InferenceSession(str(onnx_path), providers=providers)
+            sess = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
             active = sess.get_providers()[0]
         except Exception:
-            sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+            sess = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=["CPUExecutionProvider"])
             active = "CPUExecutionProvider"
 
         print(f"  Provider      : {active}")
