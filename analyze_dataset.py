@@ -46,7 +46,7 @@ def count_annotations(labels_dir: Path, nc: int, split_label: str) -> list[int]:
     files = list(labels_dir.glob("*.txt"))
     total = len(files)
     step = max(1, total // 100)
-    print(f"  [{split_label}] {total:,} label files", flush=True)
+    print(f"  [{split_label}] {total:,} label files")
     for done, txt in enumerate(files, 1):
         for line in txt.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -59,10 +59,7 @@ def count_annotations(labels_dir: Path, nc: int, split_label: str) -> list[int]:
             except (ValueError, IndexError):
                 pass
         if done % step == 0 or done == total:
-            pct = done / total
-            filled = int(30 * pct)
-            bar = "█" * filled + "░" * (30 - filled)
-            print(f"\r  [{bar}] {pct:5.1%}  ({done:,}/{total:,})", end="", flush=True)
+            print(f"\r  {done:,}/{total:,}", end="", flush=True)
     print()
     return counts
 
@@ -101,25 +98,31 @@ def plot_distribution(
     width = 0.8 / n_splits
     offsets = np.linspace(-(n_splits - 1) / 2, (n_splits - 1) / 2, n_splits) * width
 
+    # Convert counts to percentages within each split
+    split_pct: dict[str, list[float]] = {}
+    for split_label, counts in split_counts.items():
+        total = sum(counts)
+        split_pct[split_label] = [c / total * 100 if total else 0.0 for c in counts]
+
     fig, ax = plt.subplots(figsize=(max(10, nc * 0.9), 6))
 
     for offset, split_label in zip(offsets, splits):
-        counts = split_counts[split_label]
+        pcts = split_pct[split_label]
         color = split_colors.get(split_label, "#888888")
-        bars = ax.bar(x + offset, counts, width, label=split_label, color=color, alpha=0.85)
-        for bar, count in zip(bars, counts):
-            if count > 0:
+        bars = ax.bar(x + offset, pcts, width, label=split_label, color=color, alpha=0.85)
+        for bar, pct in zip(bars, pcts):
+            if pct > 0:
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + max(split_counts[split_label]) * 0.005,
-                    f"{count:,}",
+                    bar.get_height() + 0.2,
+                    f"{pct:.1f}%",
                     ha="center", va="bottom", fontsize=7, rotation=45,
                 )
 
     ax.set_xticks(x)
     ax.set_xticklabels(class_names, rotation=35, ha="right", fontsize=9)
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{int(v):,}"))
-    ax.set_ylabel("Annotations (instances)")
+    ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:.1f}%"))
+    ax.set_ylabel("% of annotations in split")
     ax.set_title(f"Class distribution — {output_path.parent.name}")
     ax.legend(title="Split")
     ax.grid(axis="y", linestyle="--", alpha=0.4)

@@ -1,0 +1,41 @@
+# =============================================================================
+# Dataset balancing configuration
+# Edit this file, then run:
+#   python balance_dataset.py
+#
+# The script pools ALL images from train/val/test, redistributes them by
+# dominant class and saves the result to <dataset_name>_balanced/.
+# The original dataset is NEVER modified.
+# =============================================================================
+
+balancer:
+
+  # Target split ratios for the balanced dataset.
+  # All images from ALL splits are pooled and then redistributed.
+  # Must sum to 1.0.
+  train_ratio: 0.80   # original: 0.80
+  val_ratio:   0.15   # original: 0.15
+  test_ratio:  0.05   # original: 0.05
+
+  # Imbalance tolerance: redistribution is skipped if the ratio between the
+  # most and least annotated class is already below this value.
+  # Example: 1.5 → accept up to 50% more annotations in the dominant class
+  # before considering the dataset unbalanced.
+  # Raise this value to allow more imbalance without triggering redistribution.
+  imbalance_tolerance: 1.5   # original: 1.5
+
+  # Warn (but do NOT abort) if any class would have fewer than this many
+  # images in train after redistribution.
+  # If a class is already rare, redistribution cannot create data — only
+  # class_weights in the training config can help.
+  min_images_per_class: 50   # original: 50
+
+  # Alert and ask for confirmation before copying if redistribution reduces
+  # any class's train image count by more than this fraction.
+  # Example: 0.30 → alert if a class loses more than 30% of its original
+  # train images.  Lower = more sensitive.
+  # WARNING: setting this too high silences alerts for severe reductions.
+  reduction_alert_threshold: 0.30   # original: 0.30
+
+  # Random seed for reproducible train/val/test splits.
+  seed: 42   # original: 42
