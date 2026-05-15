@@ -73,6 +73,9 @@ def main() -> None:
         onnx_score_threshold=cfg["onnx_score_threshold"],
         onnx_iou_threshold=cfg["onnx_iou_threshold"],
         onnx_keep_top_k=cfg["onnx_keep_top_k"],
+        early_stopping=cfg["early_stopping"],
+        early_stopping_patience=cfg["early_stopping_patience"],
+        early_stopping_min_delta=cfg["early_stopping_min_delta"],
     )
 
     run_rtmdet_pipeline(pipeline_config)

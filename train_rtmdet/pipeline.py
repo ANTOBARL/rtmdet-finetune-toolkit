@@ -135,6 +135,9 @@ class RTMDetPipelineConfig:
     onnx_score_threshold: float = 0.05
     onnx_iou_threshold: float = 0.5
     onnx_keep_top_k: int = 300
+    early_stopping: bool = False
+    early_stopping_patience: int = 20
+    early_stopping_min_delta: float = 0.001
 
 
 def is_mmdet_root(path: str | Path | None) -> bool:
@@ -716,6 +719,19 @@ test_pipeline = [
 """
 
 
+def _build_early_stopping_hook(config: RTMDetPipelineConfig) -> str:
+    if not config.early_stopping:
+        return ""
+    return (
+        f"    dict(\n"
+        f"        type='EarlyStoppingHook',\n"
+        f"        monitor='coco/bbox_mAP',\n"
+        f"        patience={config.early_stopping_patience},\n"
+        f"        min_delta={config.early_stopping_min_delta},\n"
+        f"        rule='greater'),\n"
+    )
+
+
 def generate_mmdet_config(
     config: RTMDetPipelineConfig,
     validation: DatasetValidationResult,
@@ -866,9 +882,9 @@ custom_hooks = [
         type='PipelineSwitchHook',
         switch_epoch={switch_epoch},
         switch_pipeline=train_pipeline_stage2),
-]
+{_build_early_stopping_hook(config)}]
 
-work_dir = {str((project_dir / config.model_name).resolve()).replace(chr(92), '/')!r}
+work_dir ={str((project_dir / config.model_name).resolve()).replace(chr(92), '/')!r}
 """
 
     with output_config.open("w", encoding="utf-8") as stream:

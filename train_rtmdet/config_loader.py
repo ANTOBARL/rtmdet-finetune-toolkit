@@ -82,6 +82,9 @@ def load_pipeline_config(config_path: Path | str | None = None) -> dict[str, Any
         "amp": bool(tr.get("amp", True)),
         "resume": bool(tr.get("resume", False)),
         "logger_interval": int(tr.get("logger_interval", 100)),
+        "early_stopping": bool(tr.get("early_stopping", False)),
+        "early_stopping_patience": int(tr.get("early_stopping_patience", 20)),
+        "early_stopping_min_delta": float(tr.get("early_stopping_min_delta", 0.001)),
         # ── pipeline ─────────────────────────────────────────────────────────
         "prepare_only": bool(pl.get("prepare_only", False)),
         "run_training": bool(pl.get("run_training", True)),

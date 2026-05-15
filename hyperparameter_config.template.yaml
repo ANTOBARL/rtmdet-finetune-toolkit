@@ -58,6 +58,14 @@ training:
   # Log progress every N iterations.
   logger_interval: 100
 
+  # Early stopping: halt training when mAP stops improving.
+  # Useful for small datasets where 300 epochs may cause overfitting.
+  # early_stopping_patience: stop after this many validations with no improvement.
+  # early_stopping_min_delta: minimum mAP gain that counts as improvement.
+  early_stopping: false
+  early_stopping_patience: 20
+  early_stopping_min_delta: 0.001
+
 
 pipeline:
   # true  → validate dataset and generate config only; do NOT start training.
