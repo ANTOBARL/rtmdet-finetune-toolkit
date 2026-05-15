@@ -22,6 +22,14 @@ DEFAULT_PROJECT_DIR = Path.cwd() / "runs" / "rtmdet"
 DEFAULT_PACKAGE_DIR = Path.cwd() / "models" / "rtmdet"
 
 RTMDET_MODELS = {
+    "tiny": {
+        "base_config": "rtmdet_tiny_8xb32-300e_coco.py",
+        "checkpoint": (
+            "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/"
+            "rtmdet_tiny_8xb32-300e_coco/"
+            "rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth"
+        ),
+    },
     "s": {
         "base_config": "rtmdet_s_8xb32-300e_coco.py",
         "checkpoint": (
@@ -36,6 +44,22 @@ RTMDET_MODELS = {
             "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/"
             "rtmdet_m_8xb32-300e_coco/"
             "rtmdet_m_8xb32-300e_coco_20220719_112220-229f527c.pth"
+        ),
+    },
+    "l": {
+        "base_config": "rtmdet_l_8xb32-300e_coco.py",
+        "checkpoint": (
+            "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/"
+            "rtmdet_l_8xb32-300e_coco/"
+            "rtmdet_l_8xb32-300e_coco_20220719_112030-5a0be7c4.pth"
+        ),
+    },
+    "x": {
+        "base_config": "rtmdet_x_8xb32-300e_coco.py",
+        "checkpoint": (
+            "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/"
+            "rtmdet_x_8xb32-300e_coco/"
+            "rtmdet_x_8xb32-300e_coco_20220715_230555-cc79b9ae.pth"
         ),
     },
 }
@@ -630,7 +654,10 @@ def convert_yolo_dataset_to_coco(validation: DatasetValidationResult) -> dict[st
 def get_variant_info(variant: str) -> dict[str, str]:
     key = variant.lower().strip()
     if key not in RTMDET_MODELS:
-        raise ValueError(f"Unsupported RTMDet variant: {variant}. Use 's' or 'm'.")
+        raise ValueError(
+            f"Unsupported RTMDet variant: '{variant}'. "
+            f"Valid options: {sorted(RTMDET_MODELS)}"
+        )
     return RTMDET_MODELS[key]
 
 
@@ -1253,7 +1280,7 @@ def write_run_manifest(
 
 def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
     if config.variant.lower().strip() not in RTMDET_MODELS:
-        raise ValueError("variant must be 's' or 'm'.")
+        raise ValueError(f"variant must be one of {sorted(RTMDET_MODELS)}.")
     if config.imgsz <= 0:
         raise ValueError("imgsz must be > 0.")
     if config.epochs <= 0:

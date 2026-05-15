@@ -6,6 +6,25 @@ RTMDet is a real-time single-stage detector from OpenMMLab. This pipeline covers
 
 ---
 
+## RTMDet model variants
+
+All variants use the **CSPNeXt backbone**, are pretrained on COCO, and are released under **Apache 2.0 (commercial use allowed)**.
+
+| Variant | `variant` key | COCO box AP | Params | FLOPs | Latency RTX 3090 ¹ | Latency T4 ¹ |
+|---------|:---:|:---:|:---:|:---:|:---:|:---:|
+| RTMDet-tiny | `tiny` | 41.1 | 4.8 M | 8.1 G | 0.98 ms | 2.34 ms |
+| RTMDet-s    | `s`    | 44.6 | 8.9 M | 14.8 G | 1.22 ms | 2.96 ms |
+| RTMDet-m    | `m`    | 49.4 | 24.7 M | 39.3 G | 1.62 ms | 6.41 ms |
+| RTMDet-l    | `l`    | 51.5 | 52.3 M | 80.2 G | 2.44 ms | 10.32 ms |
+| RTMDet-x    | `x`    | 52.8 | 94.9 M | 141.7 G | 3.10 ms | 18.80 ms |
+
+¹ TensorRT 8.4.3 · cuDNN 8.2.0 · FP16 · batch size 1 · **NMS escluso** · input 640×640.  
+Fonte: [OpenMMLab MMDetection — RTMDet model zoo](https://github.com/open-mmlab/mmdetection/tree/main/configs/rtmdet)
+
+To select a variant set `variant` in `hyperparameter_config.yaml` under `model`.
+
+---
+
 ## Repository structure
 
 ```
@@ -245,7 +264,7 @@ All options live in `hyperparameter_config.yaml`. Inline comments explain each p
 | Key | Default | Description |
 |---|---|---|
 | `model_name` | `my_model_rtmdet_s_640` | Name used for the run folder and output package. |
-| `variant` | `s` | `s` (small, faster) or `m` (medium, more accurate). |
+| `variant` | `s` | One of `tiny`, `s`, `m`, `l`, `x`. See model variants table above. |
 | `imgsz` | `640` | Input size in pixels. Must be a multiple of 32. |
 | `pretrained_checkpoint` | *(COCO official)* | Path to a custom `.pth` to start from instead of COCO weights. |
 

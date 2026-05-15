@@ -23,7 +23,7 @@ model:
   # Name used for the run folder and the output package.
   model_name: rtmdet_PPE_m
 
-  # RTMDet variant: s (small, faster) or m (medium, more accurate).
+  # RTMDet variant: tiny | s | m | l | x  (see README for speed/accuracy tradeoffs).
   variant: m
 
   # Input image size in pixels. Must be a multiple of 32.
