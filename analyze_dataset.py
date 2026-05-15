@@ -11,7 +11,7 @@ Usage:
 
 from __future__ import annotations
 
-from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -21,12 +21,25 @@ import yaml
 
 from train_rtmdet.config_loader import load_pipeline_config
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+
 SPLITS = [
     ("train",  "train",       "#4C72B0"),
-    ("valid",  "val / valid", "#DD8452"),
-    ("val",    "val / valid", "#DD8452"),
+    ("valid",  "val", "#DD8452"),
+    ("val",    "val", "#DD8452"),
     ("test",   "test",        "#55A868"),
 ]
+
+
+@dataclass
+class SplitStats:
+    annotation_counts: list[int]
+    total_images: int
+    annotated_images: int
+
+    @property
+    def background_images(self) -> int:
+        return self.total_images - self.annotated_images
 
 
 def load_class_names(dataset_root: Path) -> list[str]:
@@ -41,13 +54,28 @@ def load_class_names(dataset_root: Path) -> list[str]:
     return [str(n) for n in names]
 
 
-def count_annotations(labels_dir: Path, nc: int, split_label: str) -> list[int]:
+def analyze_split(split_dir: Path, nc: int, split_label: str) -> SplitStats:
+    images_dir = split_dir / "images"
+    labels_dir = split_dir / "labels"
+
+    # Total images
+    total_images = 0
+    if images_dir.is_dir():
+        total_images = sum(
+            1 for f in images_dir.iterdir()
+            if f.suffix.lower() in IMAGE_EXTENSIONS
+        )
+
     counts = [0] * nc
-    files = list(labels_dir.glob("*.txt"))
-    total = len(files)
-    step = max(1, total // 100)
-    print(f"  [{split_label}] {total:,} label files")
-    for done, txt in enumerate(files, 1):
+    annotated_images = 0
+
+    label_files = list(labels_dir.glob("*.txt")) if labels_dir.is_dir() else []
+    n_files = len(label_files)
+    step = max(1, n_files // 100)
+    print(f"  [{split_label}] {total_images:,} images, {n_files:,} label files")
+
+    for done, txt in enumerate(label_files, 1):
+        has_annotation = False
         for line in txt.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
@@ -56,41 +84,52 @@ def count_annotations(labels_dir: Path, nc: int, split_label: str) -> list[int]:
                 cls = int(line.split()[0])
                 if 0 <= cls < nc:
                     counts[cls] += 1
+                    has_annotation = True
             except (ValueError, IndexError):
                 pass
-        if done % step == 0 or done == total:
-            print(f"\r  {done:,}/{total:,}", end="", flush=True)
+        if has_annotation:
+            annotated_images += 1
+        if done % step == 0 or done == n_files:
+            print(f"\r  {done:,}/{n_files:,}", end="", flush=True)
     print()
-    return counts
+
+    # Images with no label file at all also count as background
+    # annotated_images already excludes them since we only iterated label files
+    # total_images - annotated_images covers both missing labels and empty labels
+
+    return SplitStats(
+        annotation_counts=counts,
+        total_images=total_images,
+        annotated_images=annotated_images,
+    )
 
 
-def collect_split_counts(
+def collect_split_stats(
     dataset_root: Path, class_names: list[str]
-) -> dict[str, list[int]]:
+) -> dict[str, SplitStats]:
     nc = len(class_names)
     seen_labels: set[str] = set()
-    result: dict[str, list[int]] = {}
+    result: dict[str, SplitStats] = {}
 
     for folder, label, _ in SPLITS:
         if label in seen_labels:
             continue
         split_dir = dataset_root / folder
-        labels_dir = split_dir / "labels"
-        if not labels_dir.is_dir():
+        if not split_dir.is_dir():
             continue
         seen_labels.add(label)
-        result[label] = count_annotations(labels_dir, nc, label)
+        result[label] = analyze_split(split_dir, nc, label)
 
     return result
 
 
 def plot_distribution(
     class_names: list[str],
-    split_counts: dict[str, list[int]],
+    split_stats: dict[str, SplitStats],
     output_path: Path,
 ) -> None:
     split_colors = {label: color for _, label, color in SPLITS}
-    splits = list(split_counts.keys())
+    splits = list(split_stats.keys())
     nc = len(class_names)
     n_splits = len(splits)
 
@@ -98,14 +137,21 @@ def plot_distribution(
     width = 0.8 / n_splits
     offsets = np.linspace(-(n_splits - 1) / 2, (n_splits - 1) / 2, n_splits) * width
 
-    # Convert counts to percentages within each split
     split_pct: dict[str, list[float]] = {}
-    for split_label, counts in split_counts.items():
-        total = sum(counts)
-        split_pct[split_label] = [c / total * 100 if total else 0.0 for c in counts]
+    for split_label, stats in split_stats.items():
+        total = sum(stats.annotation_counts)
+        split_pct[split_label] = [
+            c / total * 100 if total else 0.0
+            for c in stats.annotation_counts
+        ]
 
-    fig, ax = plt.subplots(figsize=(max(10, nc * 0.9), 6))
+    fig, (ax, ax_info) = plt.subplots(
+        2, 1,
+        figsize=(max(10, nc * 0.9), 8),
+        gridspec_kw={"height_ratios": [5, 1]},
+    )
 
+    # ── Bar chart ─────────────────────────────────────────────────────────────
     for offset, split_label in zip(offsets, splits):
         pcts = split_pct[split_label]
         color = split_colors.get(split_label, "#888888")
@@ -126,6 +172,34 @@ def plot_distribution(
     ax.set_title(f"Class distribution — {output_path.parent.name}")
     ax.legend(title="Split")
     ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    # ── Background summary panel ───────────────────────────────────────────────
+    ax_info.axis("off")
+    col_w = 1.0 / len(splits)
+    for i, split_label in enumerate(splits):
+        stats = split_stats[split_label]
+        n_tot = stats.total_images
+        n_ann = stats.annotated_images
+        n_bg = stats.background_images
+        pct_ann = n_ann / n_tot * 100 if n_tot else 0.0
+        pct_bg = n_bg / n_tot * 100 if n_tot else 0.0
+        color = split_colors.get(split_label, "#888888")
+
+        cx = col_w * i + col_w / 2
+        ax_info.text(cx, 0.85, split_label, ha="center", va="top",
+                     fontsize=11, fontweight="bold", color=color,
+                     transform=ax_info.transAxes)
+        ax_info.text(cx, 0.55, f"{n_tot:,} images total", ha="center", va="top",
+                     fontsize=10, transform=ax_info.transAxes)
+        ax_info.text(cx, 0.28,
+                     f"annotated: {pct_ann:.1f}%  ({n_ann:,})",
+                     ha="center", va="top", fontsize=10,
+                     color="#2ca02c", transform=ax_info.transAxes)
+        ax_info.text(cx, 0.02,
+                     f"background: {pct_bg:.1f}%  ({n_bg:,})",
+                     ha="center", va="top", fontsize=10,
+                     color="#d62728", transform=ax_info.transAxes)
+
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
@@ -151,19 +225,25 @@ def main() -> None:
     print(f"Dataset : {dataset_root}")
     print(f"Classes : {nc} — {class_names}")
 
-    split_counts = collect_split_counts(dataset_root, class_names)
-    if not split_counts:
-        raise FileNotFoundError("No split folders with labels found in the dataset.")
+    split_stats = collect_split_stats(dataset_root, class_names)
+    if not split_stats:
+        raise FileNotFoundError("No split folders found in the dataset.")
 
-    for split_label, counts in split_counts.items():
-        total = sum(counts)
-        print(f"\n[{split_label}]  {total:,} total annotations")
-        for name, count in zip(class_names, counts):
-            pct = count / total * 100 if total else 0
+    for split_label, stats in split_stats.items():
+        total_ann = sum(stats.annotation_counts)
+        n_tot = stats.total_images
+        pct_ann = stats.annotated_images / n_tot * 100 if n_tot else 0.0
+        pct_bg = stats.background_images / n_tot * 100 if n_tot else 0.0
+        print(f"\n[{split_label}]  {n_tot:,} images total  |  "
+              f"annotated: {pct_ann:.1f}% ({stats.annotated_images:,})  |  "
+              f"background: {pct_bg:.1f}% ({stats.background_images:,})")
+        print(f"  {total_ann:,} total annotations")
+        for name, count in zip(class_names, stats.annotation_counts):
+            pct = count / total_ann * 100 if total_ann else 0
             print(f"  {name:<30} {count:>8,}  ({pct:.1f}%)")
 
     output_path = dataset_root / "class_distribution.png"
-    plot_distribution(class_names, split_counts, output_path)
+    plot_distribution(class_names, split_stats, output_path)
     print(f"\nChart saved → {output_path}")
 
 
