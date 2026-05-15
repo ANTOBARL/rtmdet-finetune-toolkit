@@ -54,7 +54,8 @@ train_RTM_det/
 │       ├── export_tensorrt.py          ← IDLE (TensorRT export, future work)
 │       └── benchmark_trt.py            ← IDLE (TensorRT benchmark, future work)
 │
-├── hyperparameter_config.yaml          ← all hyperparameters and paths (edit this)
+├── hyperparameter_config.yaml          ← your local config (git-ignored, not committed)
+├── hyperparameter_config.template.yaml ← template to copy and fill in
 ├── pyproject.toml
 └── README.md
 ```
@@ -128,6 +129,12 @@ pip install -e .
 The normal workflow has three steps.
 
 ### Step 0 — Configure `hyperparameter_config.yaml`
+
+Copy the template and fill in your paths:
+
+```bash
+cp hyperparameter_config.template.yaml hyperparameter_config.yaml
+```
 
 Open `hyperparameter_config.yaml` and fill in at minimum:
 

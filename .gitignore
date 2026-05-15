@@ -227,3 +227,6 @@ mmdetection/
 datasets/
 runs/
 models/
+
+# personal config (contains local paths) — copy from hyperparameter_config.template.yaml
+hyperparameter_config.yaml
