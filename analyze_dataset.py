@@ -41,9 +41,13 @@ def load_class_names(dataset_root: Path) -> list[str]:
     return [str(n) for n in names]
 
 
-def count_annotations(labels_dir: Path, nc: int) -> list[int]:
+def count_annotations(labels_dir: Path, nc: int, split_label: str) -> list[int]:
     counts = [0] * nc
-    for txt in labels_dir.glob("*.txt"):
+    files = list(labels_dir.glob("*.txt"))
+    total = len(files)
+    step = max(1, total // 100)
+    print(f"  [{split_label}] {total:,} label files", flush=True)
+    for done, txt in enumerate(files, 1):
         for line in txt.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
@@ -54,6 +58,12 @@ def count_annotations(labels_dir: Path, nc: int) -> list[int]:
                     counts[cls] += 1
             except (ValueError, IndexError):
                 pass
+        if done % step == 0 or done == total:
+            pct = done / total
+            filled = int(30 * pct)
+            bar = "█" * filled + "░" * (30 - filled)
+            print(f"\r  [{bar}] {pct:5.1%}  ({done:,}/{total:,})", end="", flush=True)
+    print()
     return counts
 
 
@@ -72,7 +82,7 @@ def collect_split_counts(
         if not labels_dir.is_dir():
             continue
         seen_labels.add(label)
-        result[label] = count_annotations(labels_dir, nc)
+        result[label] = count_annotations(labels_dir, nc, label)
 
     return result
 
