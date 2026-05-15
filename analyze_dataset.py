@@ -160,11 +160,13 @@ def plot_distribution(
             if pct > 0:
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + 0.2,
+                    bar.get_height() + 0.4,
                     f"{pct:.1f}%",
-                    ha="center", va="bottom", fontsize=7, rotation=45,
+                    ha="center", va="bottom", fontsize=10, rotation=45,
                 )
 
+    max_pct = max(p for pcts in split_pct.values() for p in pcts)
+    ax.set_ylim(0, max_pct + 12)
     ax.set_xticks(x)
     ax.set_xticklabels(class_names, rotation=35, ha="right", fontsize=9)
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:.1f}%"))
