@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from train_rtmdet.config_loader import load_pipeline_config
-from train_rtmdet.normalize import build_rename_plan, execute_rename_plan, print_plan
+from train_rtmdet.normalize import build_rename_plan, execute_rename_plan
 
 
 def main() -> None:
@@ -36,14 +36,17 @@ def main() -> None:
     print(f"Dataset: {dataset_root}")
 
     rename_plan, warnings = build_rename_plan(dataset_root, label_prefix="")
-    print_plan(rename_plan, warnings)
+
+    for w in warnings:
+        print(f"WARNING: {w}")
 
     if not rename_plan:
         print("All filenames are already normalized — nothing to do.")
         return
 
+    print(f"{len(rename_plan)} files to rename.")
     execute_rename_plan(rename_plan)
-    print(f"\nDone — {len(rename_plan)} files renamed.")
+    print(f"Done — {len(rename_plan)} files renamed.")
 
 
 if __name__ == "__main__":

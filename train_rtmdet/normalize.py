@@ -173,25 +173,48 @@ def print_plan(rename_plan: list[RenameItem], warnings: list[str]) -> None:
         print(f"{item.source} -> {item.target}")
 
 
+def _print_progress(done: int, total: int) -> None:
+    pct = done / total
+    filled = int(30 * pct)
+    bar = "█" * filled + "░" * (30 - filled)
+    print(f"\r  [{bar}] {pct:5.1%}  ({done}/{total})", end="", flush=True)
+
+
 def execute_rename_plan(rename_plan: list[RenameItem]) -> None:
     temp_map: list[tuple[Path, Path, Path]] = []
-    token = uuid.uuid4().hex
+    token = uuid.uuid4().hex[:8]
+    total = len(rename_plan)
 
-    for item in rename_plan:
+    for i, item in enumerate(rename_plan):
         if item.source.resolve() == item.target.resolve():
             continue
-        temp_path = item.source.with_name(f"{item.source.name}.tmp_rename_{token}")
-        item.source.rename(temp_path)
+        # Short temp name avoids Windows MAX_PATH (260 chars) on long filenames.
+        temp_path = item.source.with_name(f"_t{i}_{token}")
+        try:
+            item.source.rename(temp_path)
+        except Exception:
+            for done_temp, _, original_source in reversed(temp_map):
+                if done_temp.exists():
+                    done_temp.rename(original_source)
+            raise
         temp_map.append((temp_path, item.target, item.source))
 
+    n = len(temp_map)
+    step = max(1, n // 100)
     try:
-        for temp_path, target_path, _original_source in temp_map:
+        for done, (temp_path, target_path, _original_source) in enumerate(temp_map, 1):
             temp_path.rename(target_path)
+            if done % step == 0 or done == n:
+                _print_progress(done, n)
     except Exception:
-        for temp_path, _target_path, original_source in reversed(temp_map):
+        print()
+        for temp_path, target_path, original_source in reversed(temp_map):
             if temp_path.exists():
                 temp_path.rename(original_source)
+            elif target_path.exists():
+                target_path.rename(original_source)
         raise
+    print()
 
 
 def main() -> int:
