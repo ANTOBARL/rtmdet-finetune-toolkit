@@ -49,6 +49,7 @@ numpy>=1.24,<2.0           # numpy 2.x breaks several mmdet/mmcv ops
 opencv-python-headless>=4.8.0
 Pillow>=10.0
 scipy>=1.11
+matplotlib>=3.7
 
 
 # ── Config / utilities ────────────────────────────────────────────────────────
