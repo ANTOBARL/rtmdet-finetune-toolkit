@@ -27,13 +27,13 @@ from train_rtmdet.pipeline import RTMDetPipelineConfig, run_rtmdet_pipeline
 
 
 def main() -> None:
-    config_path = Path(__file__).resolve().parent / "iperparameter_config.txt"
+    config_path = Path(__file__).resolve().parent / "hyperparameter_config.yaml"
     cfg = load_pipeline_config(config_path)
 
     if cfg["dataset_path"] is None:
         raise ValueError(
-            "dataset_path is not set in iperparameter_config.txt. "
-            "Edit the [dataset] section before running."
+            "dataset_path is not set in hyperparameter_config.yaml. "
+            "Edit the dataset section before running."
         )
 
     pipeline_config = RTMDetPipelineConfig(

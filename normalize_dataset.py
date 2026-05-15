@@ -7,7 +7,7 @@ format:  train_1.jpg / train_1.txt,  val_1.jpg / val_1.txt, etc.
 Usage:
     python normalize_dataset.py
 
-dataset_path is read from iperparameter_config.txt.
+dataset_path is read from hyperparameter_config.yaml.
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ from train_rtmdet.normalize import build_rename_plan, execute_rename_plan, print
 
 
 def main() -> None:
-    config_path = Path(__file__).resolve().parent / "iperparameter_config.txt"
+    config_path = Path(__file__).resolve().parent / "hyperparameter_config.yaml"
     cfg = load_pipeline_config(config_path)
 
     dataset_path = cfg.get("dataset_path")
     if dataset_path is None:
         raise ValueError(
-            "dataset_path is not set in iperparameter_config.txt. "
-            "Edit the [dataset] section before running."
+            "dataset_path is not set in hyperparameter_config.yaml. "
+            "Edit the dataset section before running."
         )
 
     dataset_root = Path(dataset_path).resolve()

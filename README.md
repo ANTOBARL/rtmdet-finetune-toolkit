@@ -15,7 +15,7 @@ train_RTM_det/
 │   ├── __init__.py
 │   ├── pipeline.py                     ← core training pipeline logic
 │   ├── normalize.py                    ← dataset filename normalization
-│   ├── config_loader.py                ← reads iperparameter_config.txt
+│   ├── config_loader.py                ← reads hyperparameter_config.yaml
 │   └── export/
 │       ├── __init__.py
 │       ├── onnx.py                     ← ONNX export functions
@@ -28,14 +28,14 @@ train_RTM_det/
 │   ├── dataset/
 │   │   └── prepare_dataset.py          ← optional: convert raw YOLO → RTMDet format
 │   ├── export_onnx/
-│   │   ├── export_config.txt           ← standalone ONNX export config (edit this)
-│   │   └── export_onnx.py              ← standalone ONNX export (post-training)
+│   │   ├── export_config.yaml          ← standalone ONNX export config (edit this)
+│   │   └── export_onnx.py              ← standalone ONNX export (post-training, no retraining)
 │   └── export_tensorrt/
-│       ├── export_config.txt           ← IDLE (TensorRT export config)
+│       ├── export_config.yaml          ← IDLE (TensorRT export config)
 │       ├── export_tensorrt.py          ← IDLE (TensorRT export, future work)
 │       └── benchmark_trt.py            ← IDLE (TensorRT benchmark, future work)
 │
-├── iperparameter_config.txt            ← all hyperparameters and paths (edit this)
+├── hyperparameter_config.yaml          ← all hyperparameters and paths (edit this)
 ├── pyproject.toml
 └── README.md
 ```
@@ -54,12 +54,12 @@ git clone https://github.com/open-mmlab/mmdetection.git
 git clone https://github.com/open-mmlab/mmdeploy.git   # only needed for ONNX export
 ```
 
-After cloning, set the corresponding paths in `iperparameter_config.txt`:
+After cloning, set the corresponding paths in `hyperparameter_config.yaml`:
 
-```ini
-[paths]
-mmdet_root    = C:\path\to\train_RTM_det\mmdetection
-mmdeploy_root = C:\path\to\train_RTM_det\mmdeploy
+```yaml
+paths:
+  mmdet_root: 'C:\path\to\train_RTM_det\mmdetection'
+  mmdeploy_root: 'C:\path\to\train_RTM_det\mmdeploy'
 ```
 
 ### Python environment
@@ -108,16 +108,16 @@ pip install -e .
 
 The normal workflow has three steps.
 
-### Step 0 — Configure `iperparameter_config.txt`
+### Step 0 — Configure `hyperparameter_config.yaml`
 
-Open `iperparameter_config.txt` and fill in at minimum:
+Open `hyperparameter_config.yaml` and fill in at minimum:
 
-```ini
-[dataset]
-dataset_path = C:\path\to\your\dataset
+```yaml
+dataset:
+  dataset_path: 'C:\path\to\your\dataset'
 
-[paths]
-mmdet_root = C:\path\to\mmdetection
+paths:
+  mmdet_root: 'C:\path\to\mmdetection'
 ```
 
 Everything else has a working default. See the [Configuration reference](#configuration-reference) section for a full description of all options.
@@ -138,7 +138,7 @@ val_1.jpg   / val_1.txt
 ...
 ```
 
-This ensures MMDetection can reliably pair images with their labels. The script reads `dataset_path` from `iperparameter_config.txt` and is safe to run multiple times — files that are already normalized are skipped.
+This ensures MMDetection can reliably pair images with their labels. The script reads `dataset_path` from `hyperparameter_config.yaml` and is safe to run multiple times — files that are already normalized are skipped.
 
 ---
 
@@ -154,10 +154,10 @@ Internally the pipeline runs these steps in order:
 2. Convert YOLO `.txt` labels to COCO JSON format (`annotations/instances_train.json`, etc.).
 3. Generate a MMDetection training config (saved to `runs/rtmdet/_configs/`).
 4. Launch `mmdetection/tools/train.py` with the generated config.
-5. If `save_onnx_weights = True`: export the best checkpoint to `end2end.onnx` via MMDeploy, then validate the ONNX graph with ONNXRuntime.
+5. If `save_onnx_weights: true`: export the best checkpoint to `end2end.onnx` via MMDeploy, then validate the ONNX graph with ONNXRuntime.
 6. Package the best checkpoint, config, `classes.txt`, and ONNX file (if produced) into `models/rtmdet/<model_name>/`.
 
-> **Quick test run** — set `prepare_only = True` to stop after step 3. This validates the dataset and generates the config without starting training, useful to check that everything is set up correctly before committing to a full run.
+> **Quick test run** — set `prepare_only: true` to stop after step 3. This validates the dataset and generates the config without starting training, useful to check that everything is set up correctly before committing to a full run.
 
 ---
 
@@ -171,7 +171,7 @@ runs/rtmdet/<model_name>/
 │   └── <model_name>_rtmdet_s_<timestamp>.py   ← generated MMDetection config
 ├── best_coco_bbox_mAP_epoch_N.pth              ← best checkpoint
 ├── latest.pth
-├── export_onnx/                                ← present if save_onnx_weights=True
+├── export_onnx/                                ← present if save_onnx_weights: true
 │   ├── end2end.onnx
 │   ├── pipeline.json
 │   └── deploy.json
@@ -181,7 +181,7 @@ models/rtmdet/<model_name>/                     ← packaged artifacts
 ├── <config>.py
 ├── best_coco_bbox_mAP_epoch_N.pth
 ├── classes.txt
-├── end2end.onnx                                ← present if save_onnx_weights=True
+├── end2end.onnx                                ← present if save_onnx_weights: true
 └── metadata.json
 ```
 
@@ -211,9 +211,9 @@ dataset_root/
 ```
 All values normalized to `[0, 1]` relative to image dimensions.
 
-**Segmentation annotations** — if your dataset uses YOLO-seg format (`class_id x1 y1 x2 y2 ...`), set `convert_segments_to_boxes = True` (default) to convert them to bounding boxes automatically.
+**Segmentation annotations** — if your dataset uses YOLO-seg format (`class_id x1 y1 x2 y2 ...`), set `convert_segments_to_boxes: true` (default) to convert them to bounding boxes automatically.
 
-**Images without labels** are treated as hard negatives when `allow_missing_labels = True`.
+**Images without labels** are treated as hard negatives when `allow_missing_labels: true`.
 
 ### Optional: convert a raw YOLO dataset to RTMDet format
 
@@ -224,23 +224,23 @@ If your dataset needs to be restructured (e.g. it uses `val/` instead of `valid/
 python tools/dataset/prepare_dataset.py
 ```
 
-This creates a `<dataset_name>_rtmdet/` copy with images, labels, COCO JSON annotations, and `classes.txt` already in place. Point `dataset_path` in `iperparameter_config.txt` to the new folder.
+This creates a `<dataset_name>_rtmdet/` copy with images, labels, COCO JSON annotations, and `classes.txt` already in place. Point `dataset_path` in `hyperparameter_config.yaml` to the new folder.
 
 ---
 
 ## Configuration reference
 
-All options live in `iperparameter_config.txt`. Inline comments explain each parameter; the table below is a quick reference.
+All options live in `hyperparameter_config.yaml`. Inline comments explain each parameter; the table below is a quick reference.
 
-### `[dataset]`
+### `dataset`
 
 | Key | Default | Description |
 |---|---|---|
 | `dataset_path` | — | Absolute path to the dataset root. **Required.** |
-| `class_names` | *(from data.yaml)* | Comma-separated class names override. |
+| `class_names` | *(from data.yaml)* | List of class names override. |
 | `nc` | *(from data.yaml)* | Number of classes override. |
 
-### `[model]`
+### `model`
 
 | Key | Default | Description |
 |---|---|---|
@@ -249,7 +249,7 @@ All options live in `iperparameter_config.txt`. Inline comments explain each par
 | `imgsz` | `640` | Input size in pixels. Must be a multiple of 32. |
 | `pretrained_checkpoint` | *(COCO official)* | Path to a custom `.pth` to start from instead of COCO weights. |
 
-### `[training]`
+### `training`
 
 | Key | Default | Description |
 |---|---|---|
@@ -261,21 +261,21 @@ All options live in `iperparameter_config.txt`. Inline comments explain each par
 | `val_interval` | `5` | Run validation every N epochs. |
 | `base_lr` | `0.001` | Peak learning rate (AdamW). |
 | `device` | `cuda:0` | Training device (`cuda:0`, `cuda:1`, `cpu`). |
-| `amp` | `True` | Automatic Mixed Precision. Recommended on modern GPUs. |
-| `resume` | `False` | Resume from the latest checkpoint in the run folder. |
+| `amp` | `true` | Automatic Mixed Precision. Recommended on modern GPUs. |
+| `resume` | `false` | Resume from the latest checkpoint in the run folder. |
 | `logger_interval` | `100` | Print training log every N iterations. |
 
-### `[pipeline]`
+### `pipeline`
 
 | Key | Default | Description |
 |---|---|---|
-| `prepare_only` | `False` | Stop after config generation — do not start training. |
-| `run_training` | `True` | Run the training step. |
-| `run_evaluation` | `False` | Run evaluation on val/test after training. |
-| `save_onnx_weights` | `False` | Export best checkpoint to ONNX after training. Requires `mmdeploy_root`. |
-| `run_packaging` | `True` | Copy artifacts to `models/rtmdet/<model_name>/`. |
+| `prepare_only` | `false` | Stop after config generation — do not start training. |
+| `run_training` | `true` | Run the training step. |
+| `run_evaluation` | `false` | Run evaluation on val/test after training. |
+| `save_onnx_weights` | `false` | Export best checkpoint to ONNX after training. Requires `mmdeploy_root`. |
+| `run_packaging` | `true` | Copy artifacts to `models/rtmdet/<model_name>/`. |
 
-### `[onnx_export]`
+### `onnx_export`
 
 These parameters define the post-processing baked permanently into the ONNX graph. They cannot be changed at inference without re-exporting.
 
@@ -285,45 +285,55 @@ These parameters define the post-processing baked permanently into the ONNX grap
 | `iou_threshold` | `0.5` | IoU threshold for Non-Maximum Suppression. |
 | `keep_top_k` | `300` | Maximum detections per image (output tensor size). |
 
-### `[paths]`
+### `paths`
 
 | Key | Default | Description |
 |---|---|---|
 | `project_dir` | `<cwd>/runs/rtmdet` | Where training runs are saved. |
 | `package_dir` | `<cwd>/models/rtmdet` | Where model packages are saved. |
 | `mmdet_root` | — | Path to the MMDetection clone. **Required for training.** |
-| `mmdeploy_root` | — | Path to the MMDeploy clone. Required when `save_onnx_weights = True`. |
+| `mmdeploy_root` | — | Path to the MMDeploy clone. Required when `save_onnx_weights: true`. |
 
-### `[preprocessing]`
+### `preprocessing`
 
 | Key | Default | Description |
 |---|---|---|
-| `convert_segments_to_boxes` | `True` | Convert YOLO-seg polygon rows to bounding boxes. |
-| `allow_missing_labels` | `True` | Accept images without a `.txt` label (treated as negatives). |
-| `stop_on_validation_errors` | `True` | Abort if the dataset has annotation errors. |
+| `convert_segments_to_boxes` | `true` | Convert YOLO-seg polygon rows to bounding boxes. |
+| `allow_missing_labels` | `true` | Accept images without a `.txt` label (treated as negatives). |
+| `stop_on_validation_errors` | `true` | Abort if the dataset has annotation errors. |
 
 ---
 
 ## Standalone ONNX export
 
-To export a checkpoint without re-running training (e.g. to change thresholds):
+Use `tools/export_onnx/export_onnx.py` when you want to export an already-trained
+checkpoint to ONNX **without re-running the training pipeline** — for example to
+change NMS thresholds, try a different `keep_top_k`, or export a checkpoint produced
+by a previous run.
+
+> The main `hyperparameter_config.yaml` is **not** read by this tool. All settings
+> are configured exclusively in `tools/export_onnx/export_config.yaml`.
 
 ```bash
-# 1. Edit tools/export_onnx/export_config.txt
+# 1. Edit tools/export_onnx/export_config.yaml
 #    Set project_dir + model_name (or checkpoint_path directly).
 # 2. Run:
 python tools/export_onnx/export_onnx.py
 ```
 
-The script auto-detects the MMDetection config and input size from the run manifest (`rtmdet_pipeline_manifest.json`) in the checkpoint folder. All settings (score threshold, IoU threshold, output size, device, paths) are configured exclusively in `tools/export_onnx/export_config.txt` — the main `iperparameter_config.txt` is not read.
+The script auto-detects the MMDetection config and input size from the run manifest
+(`rtmdet_pipeline_manifest.json`) in the checkpoint folder.
 
 ---
 
 ## TensorRT export (future work)
 
-TensorRT export is currently **IDLE**. The scripts in `tools/export/export_tensorrt/` contain the implementation but are not active yet, because they require hardware-specific setup (TensorRT SDK version, CUDA/cuDNN versions, custom ops build for MMDeploy). They will be activated once the target hardware is defined.
+TensorRT export is currently **IDLE**. The scripts in `tools/export_tensorrt/` contain
+the implementation but are not active yet, because they require hardware-specific setup
+(TensorRT SDK version, CUDA/cuDNN versions, custom ops build for MMDeploy). They will
+be activated once the target hardware is defined.
 
 When ready:
-1. Edit `tools/export_tensorrt/export_config.txt`.
+1. Edit `tools/export_tensorrt/export_config.yaml`.
 2. Run `python tools/export_tensorrt/export_tensorrt.py`.
 3. Benchmark on the target device: `python tools/export_tensorrt/benchmark_trt.py`.

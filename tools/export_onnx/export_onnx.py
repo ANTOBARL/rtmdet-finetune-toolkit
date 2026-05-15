@@ -1,8 +1,13 @@
 """
-Standalone ONNX export — independent tool, does not require the training
-pipeline to be configured.
+Standalone ONNX export — independent tool to convert an already-trained
+RTMDet checkpoint to ONNX without re-running the training pipeline.
 
-All parameters are read from export_config.txt in the same directory.
+Use this when you want to:
+  - Export a checkpoint with different NMS thresholds without retraining.
+  - Export a checkpoint that was produced by a previous training run.
+  - Re-export after changing score_threshold, iou_threshold, or keep_top_k.
+
+All parameters are read from export_config.yaml in the same directory.
 
 Output files:
   end2end.onnx   — full model with NMS baked in
@@ -10,20 +15,22 @@ Output files:
   deploy.json    — backend metadata
 
 Usage:
-  1. Edit export_config.txt (set checkpoint_path or project_dir + model_name).
+  1. Edit export_config.yaml (set checkpoint_path or project_dir + model_name).
   2. python export_onnx.py
 """
 
 from __future__ import annotations
 
-import configparser
 import json
 import sys
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 # Repo root is 3 levels up: export_onnx/ → tools/ → repo root
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-CONFIG_FILE = Path(__file__).resolve().parent / "export_config.txt"
+CONFIG_FILE = Path(__file__).resolve().parent / "export_config.yaml"
 
 sys.path.insert(0, str(REPO_ROOT))
 
@@ -34,31 +41,17 @@ from train_rtmdet.export.onnx import run_onnx_export, validate_onnx
 # Config loading
 # ---------------------------------------------------------------------------
 
-def _load_config() -> configparser.ConfigParser:
+def _load_config() -> dict[str, Any]:
     if not CONFIG_FILE.is_file():
         raise FileNotFoundError(f"Config file not found: {CONFIG_FILE}")
-    parser = configparser.ConfigParser(inline_comment_prefixes=("#",))
-    parser.read(str(CONFIG_FILE), encoding="utf-8")
-    return parser
+    with open(CONFIG_FILE, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
-def _opt(value: str) -> str | None:
-    s = value.strip()
-    return s if s else None
-
-
-def _opt_path(value: str) -> Path | None:
-    s = value.strip()
-    return Path(s).expanduser() if s else None
-
-
-def _opt_int(value: str) -> int | None:
-    s = value.strip()
-    return int(s) if s else None
-
-
-def _to_bool(value: str) -> bool:
-    return value.strip().lower() in {"true", "1", "yes"}
+def _to_path(value: Any) -> Path | None:
+    if value is None or str(value).strip() == "":
+        return None
+    return Path(str(value)).expanduser()
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +111,7 @@ def _find_best_checkpoint(project_dir: Path, model_name: str) -> Path:
     if not candidates:
         raise FileNotFoundError(
             f"No best checkpoint found in {run_dir}.\n"
-            "Set checkpoint_path in export_config.txt."
+            "Set checkpoint_path in export_config.yaml."
         )
     return max(candidates, key=lambda p: p.stat().st_mtime).resolve()
 
@@ -148,7 +141,7 @@ def _find_sample_image(manifest: dict | None, checkpoint_file: Path) -> Path:
 
     raise FileNotFoundError(
         "Cannot find a sample image for MMDeploy.\n"
-        "Set sample_image in export_config.txt [paths]."
+        "Set sample_image in export_config.yaml under [paths]."
     )
 
 
@@ -157,20 +150,26 @@ def _find_sample_image(manifest: dict | None, checkpoint_file: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = _load_config()
+    cfg = _load_config()
+
+    chk = cfg.get("checkpoint", {})
+    mdl = cfg.get("model", {})
+    onnx_cfg = cfg.get("onnx", {})
+    paths_cfg = cfg.get("paths", {})
+    out_cfg = cfg.get("output", {})
 
     # ── checkpoint ────────────────────────────────────────────────────────────
-    checkpoint_path = _opt_path(parser.get("checkpoint", "checkpoint_path", fallback=""))
+    checkpoint_path = _to_path(chk.get("checkpoint_path"))
     if checkpoint_path:
         checkpoint_file = checkpoint_path.resolve()
     else:
-        project_dir = _opt_path(parser.get("checkpoint", "project_dir", fallback=""))
-        model_name = _opt(parser.get("checkpoint", "model_name", fallback=""))
+        project_dir = _to_path(chk.get("project_dir"))
+        model_name = chk.get("model_name")
         if not project_dir or not model_name:
             raise ValueError(
-                "Set checkpoint_path (or both project_dir + model_name) in export_config.txt."
+                "Set checkpoint_path (or both project_dir + model_name) in export_config.yaml."
             )
-        checkpoint_file = _find_best_checkpoint(project_dir, model_name)
+        checkpoint_file = _find_best_checkpoint(project_dir, str(model_name))
 
     if not checkpoint_file.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_file}")
@@ -179,32 +178,32 @@ def main() -> None:
     manifest = _load_manifest(_find_manifest(checkpoint_file))
     mmdet_config = _infer_config_path(checkpoint_file, manifest)
 
-    imgsz_override = _opt_int(parser.get("model", "imgsz", fallback=""))
-    resolved_imgsz = imgsz_override if imgsz_override else _infer_imgsz(mmdet_config, manifest)
+    imgsz_override = mdl.get("imgsz")
+    resolved_imgsz = int(imgsz_override) if imgsz_override else _infer_imgsz(mmdet_config, manifest)
 
-    sample_image_cfg = _opt_path(parser.get("paths", "sample_image", fallback=""))
+    sample_image_cfg = _to_path(paths_cfg.get("sample_image"))
     sample_image = (
         sample_image_cfg.resolve() if sample_image_cfg
         else _find_sample_image(manifest, checkpoint_file)
     )
 
-    work_dir_cfg = _opt_path(parser.get("output", "work_dir", fallback=""))
+    work_dir_cfg = _to_path(out_cfg.get("work_dir"))
     output_dir = (
         work_dir_cfg.resolve() if work_dir_cfg
         else (checkpoint_file.parent / "export_onnx").resolve()
     )
 
-    mmdeploy_root_cfg = _opt_path(parser.get("paths", "mmdeploy_root", fallback=""))
+    mmdeploy_root_cfg = _to_path(paths_cfg.get("mmdeploy_root"))
     mmdeploy_root = mmdeploy_root_cfg.resolve() if mmdeploy_root_cfg else REPO_ROOT / "mmdeploy"
 
-    mmdet_root_cfg = _opt_path(parser.get("paths", "mmdet_root", fallback=""))
+    mmdet_root_cfg = _to_path(paths_cfg.get("mmdet_root"))
     mmdet_root = mmdet_root_cfg.resolve() if (mmdet_root_cfg and mmdet_root_cfg.is_dir()) else None
 
-    device = parser.get("model", "device", fallback="cuda:0").strip()
-    score_threshold = float(parser.get("onnx", "score_threshold", fallback="0.05"))
-    iou_threshold = float(parser.get("onnx", "iou_threshold", fallback="0.5"))
-    keep_top_k = int(parser.get("onnx", "keep_top_k", fallback="300"))
-    do_validate = _to_bool(parser.get("onnx", "validate", fallback="true"))
+    device = str(mdl.get("device", "cuda:0")).strip()
+    score_threshold = float(onnx_cfg.get("score_threshold", 0.05))
+    iou_threshold = float(onnx_cfg.get("iou_threshold", 0.5))
+    keep_top_k = int(onnx_cfg.get("keep_top_k", 300))
+    do_validate = bool(onnx_cfg.get("validate", True))
 
     # ── summary ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
