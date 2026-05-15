@@ -133,10 +133,6 @@ def redistribute(
         rng.shuffle(group)
         n = len(group)
 
-        if key is None:
-            train_out.extend(group)
-            continue
-
         n_test = max(0, round(n * cfg.test_ratio))
         n_val = max(0, round(n * cfg.val_ratio))
         n_train = n - n_val - n_test
