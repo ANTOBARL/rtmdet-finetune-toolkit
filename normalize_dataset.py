@@ -7,27 +7,21 @@ format:  train_1.jpg / train_1.txt,  val_1.jpg / val_1.txt, etc.
 Usage:
     python normalize_dataset.py
 
-dataset_path is read from hyperparameter_config.yaml.
+dataset_path is read from dataset_workflow_config.yaml.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from train_rtmdet.config_loader import load_pipeline_config
+from train_rtmdet.dataset_workflow_config import load_dataset_workflow_dataset_path
 from train_rtmdet.normalize import build_rename_plan, execute_rename_plan
 
 
 def main() -> None:
-    config_path = Path(__file__).resolve().parent / "hyperparameter_config.yaml"
-    cfg = load_pipeline_config(config_path)
-
-    dataset_path = cfg.get("dataset_path")
+    dataset_path = load_dataset_workflow_dataset_path()
     if dataset_path is None:
-        raise ValueError(
-            "dataset_path is not set in hyperparameter_config.yaml. "
-            "Edit the dataset section before running."
-        )
+        raise ValueError("dataset_path is not set in dataset_workflow_config.yaml.")
 
     dataset_root = Path(dataset_path).resolve()
     if not dataset_root.is_dir():

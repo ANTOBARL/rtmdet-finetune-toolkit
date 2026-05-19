@@ -31,10 +31,9 @@ from train_rtmdet.balancer import (
     redistribute,
     reduction_alerts,
 )
-from train_rtmdet.config_loader import load_pipeline_config
+from train_rtmdet.dataset_workflow_config import load_dataset_workflow_dataset_path
 
 _BALANCER_CFG = Path(__file__).resolve().parent / "dataset_balancer.yaml"
-_PIPELINE_CFG = Path(__file__).resolve().parent / "hyperparameter_config.yaml"
 
 
 def _load_class_names(dataset_root: Path) -> list[str]:
@@ -70,18 +69,17 @@ def _load_balancer_config() -> BalancerConfig:
 
 
 def main() -> None:
-    pipeline_cfg = load_pipeline_config(_PIPELINE_CFG)
     bal = _load_balancer_config()
 
-    dataset_path = pipeline_cfg.get("dataset_path")
+    dataset_path = load_dataset_workflow_dataset_path()
     if dataset_path is None:
-        raise ValueError("dataset_path not set in hyperparameter_config.yaml.")
+        raise ValueError("dataset_path is not set in dataset_workflow_config.yaml.")
 
     dataset_root = Path(dataset_path).resolve()
     if not dataset_root.is_dir():
         raise FileNotFoundError(f"Dataset not found: {dataset_root}")
 
-    class_names = pipeline_cfg.get("class_names") or _load_class_names(dataset_root)
+    class_names = _load_class_names(dataset_root)
     nc = len(class_names)
     dst_root = dataset_root.parent / (dataset_root.name + "_balanced")
 

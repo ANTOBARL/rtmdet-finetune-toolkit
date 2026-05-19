@@ -38,4 +38,4 @@ balancer:
   reduction_alert_threshold: 0.30   # original: 0.30
 
   # Random seed for reproducible train/val/test splits.
-  seed: 42   # original: 42
+  seed: 1  

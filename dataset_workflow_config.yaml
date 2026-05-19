@@ -1,0 +1,97 @@
+# =============================================================================
+# Dataset workflow configuration
+# Preferred config file for dataset analysis / balancing / normalization /
+# size-based augmentation.
+#
+# Edit this file, then run:
+#   python analyze_dataset.py
+#   python balance_dataset.py
+#   python normalize_dataset.py
+#   python augment_by_size.py
+#
+# The script creates a new dataset named <dataset_name>_dimension_augmented
+# next to the original when running size-based augmentation.
+# Original data is never modified.
+# =============================================================================
+
+dimension_augmenter:
+
+  # Absolute path to the dataset root used by:
+  #   analyze_dataset.py
+  #   balance_dataset.py
+  #   normalize_dataset.py
+  #   augment_by_size.py
+  dataset_path: 'C:\Users\AntonioreneèBarletta\Desktop\dataset_vision_ripuliti\bootstrap_vest_dimension_augmented'
+
+  # Desired COCO-style size distribution over object annotations.
+  # Must sum to 1.0.
+  target_distribution:
+    small: 0.35
+    medium: 0.40
+    large: 0.25
+
+  # Stop when the final distribution is within this absolute tolerance for
+  # every size bin. Example: 0.02 = +/-2 percentage points.
+  tolerance: 0.02
+
+  # Random seed for reproducible candidate selection and scale sampling.
+  seed: 1
+
+  # Output folder suffix. Result:
+  #   <dataset_name>_dimension_augmented
+  output_suffix: "_dimension_augmented"
+
+  # If true, copy original images/labels and add augmented ones on top.
+  # If false, enabled splits will contain only generated samples.
+  preserve_originals: true
+
+  # Choose which splits receive dimension augmentation.
+  # Recommended default: train only.
+  apply_to:
+    train: true
+    val: false
+    test: false
+
+  # Downscale creates smaller objects via resize + padding.
+  allow_downscale: true
+
+  # Upscale creates larger objects via resize + center crop back to the
+  # original image size. Some objects near the border may be clipped.
+  allow_upscale: false
+
+  # Global safety limits.
+  max_new_images: 3000
+
+  # Optional percentage cap relative to the number of source images in the
+  # split being augmented. Example: 50 = generate at most 50% new images
+  # compared to the original split size. If set, the effective limit becomes:
+  #   min(max_new_images, percent_cap)
+  # Set to null to disable the percentage cap.
+  max_new_images_percent: null
+
+  max_copies_per_source_image: 3
+
+  # Scale ranges sampled when trying to push objects toward a target bin.
+  scale_ranges:
+    to_small: [0.35, 0.65]
+    to_medium: [0.65, 0.90]
+    to_large: [1.10, 1.35]
+
+  # Padding used when scale <= 1.0.
+  # Example colors:
+  #   black = [0, 0, 0]
+  #   white = [255, 255, 255]
+  #   gray  = [114, 114, 114]
+  padding:
+    mode: "constant"
+    color: [114, 114, 114]
+
+  # Filters applied after transforming bounding boxes.
+  filters:
+    min_bbox_size_px: 4
+    min_bbox_area_px2: 16
+    skip_images_without_labels: true
+
+  # If false, the script will continue generating until max_new_images even if
+  # tolerance is already reached.
+  stop_when_within_tolerance: true

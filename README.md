@@ -164,7 +164,77 @@ val_1.jpg   / val_1.txt
 ...
 ```
 
-This ensures MMDetection can reliably pair images with their labels. The script reads `dataset_path` from `hyperparameter_config.yaml` and is safe to run multiple times — files that are already normalized are skipped.
+This ensures MMDetection can reliably pair images with their labels. The script reads `dataset_path` from `dataset_workflow_config.yaml` and is safe to run multiple times — files that are already normalized are skipped.
+
+---
+
+### Step 1.5 — Analyze dataset before training
+
+```bash
+python analyze_dataset.py
+```
+
+This optional check helps you understand the dataset before training by reporting:
+
+- class distribution for each split (`train` / `val` / `test`)
+- annotated vs background image ratio
+- object size distribution using COCO area bins: `small`, `medium`, `large`
+
+The script saves two charts in the dataset folder:
+
+- `class_distribution.png`
+- `object_size_distribution.png`
+
+COCO size bins are computed from the real bbox area in pixels:
+
+- `small`: area `< $32^2$`
+- `medium`: `$32^2 \leq$ area < $96^2$`
+- `large`: area `$\geq 96^2$`
+
+This is useful before training because class imbalance and object-scale imbalance often affect model selection, input resolution, augmentation strategy, and expected detection quality on small objects.
+
+---
+
+### Step 1.6 — Augment object-size distribution
+
+```bash
+python augment_by_size.py
+```
+
+This optional step reads `dataset_workflow_config.yaml` and creates a new dataset:
+
+- `<dataset_name>_dimension_augmented`
+
+You set `dataset_path` directly in `dataset_workflow_config.yaml`.
+
+The tool works toward a target COCO size distribution (`small`, `medium`, `large`) by generating resized copies of source images and updating YOLO labels automatically.
+
+Default target distribution:
+
+- `small`: `35%`
+- `medium`: `40%`
+- `large`: `25%`
+
+Behavior:
+
+- by default it augments only `train`
+- originals are preserved unless `preserve_originals: false`
+- downscale uses resize + padding back to the original image size
+- upscale, if enabled, uses resize + center-crop back to the original image size
+- you can cap generated samples with both `max_new_images` and `max_new_images_percent`
+- output is saved next to the input dataset, never in place
+
+Recommended workflow:
+
+1. Run `python analyze_dataset.py`
+2. Run `python balance_dataset.py` if split balancing is needed
+3. Run `python normalize_dataset.py`
+4. Run `python analyze_dataset.py` again
+5. Tune `dataset_workflow_config.yaml`
+6. Run `python augment_by_size.py`
+7. Run `python analyze_dataset.py` on the augmented dataset
+
+The script also writes `dimension_augmentation_manifest.json` in the output dataset folder with the initial/final size distributions and generated samples.
 
 ---
 
