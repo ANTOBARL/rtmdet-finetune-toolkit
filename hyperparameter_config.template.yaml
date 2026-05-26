@@ -82,6 +82,13 @@ pipeline:
 
   run_packaging: true
 
+  # Generate training plots after each run (requires matplotlib: pip install matplotlib).
+  # Produces plots/ inside the run folder:
+  #   training_curves.png  — loss, validation mAP and learning-rate schedule over time.
+  #   per_class_map50.png  — bar chart of mAP50 per class at the best epoch.
+  #   confusion_matrix.png — row-normalised confusion matrix (only when run_evaluation: true).
+  generate_plots: true
+
 
 onnx_export:
   # Score threshold baked into the ONNX graph.

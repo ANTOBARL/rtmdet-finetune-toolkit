@@ -76,6 +76,7 @@ def main() -> None:
         early_stopping=cfg["early_stopping"],
         early_stopping_patience=cfg["early_stopping_patience"],
         early_stopping_min_delta=cfg["early_stopping_min_delta"],
+        generate_plots=cfg["generate_plots"],
     )
 
     run_rtmdet_pipeline(pipeline_config)

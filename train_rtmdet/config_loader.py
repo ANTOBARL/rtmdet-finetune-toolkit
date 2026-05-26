@@ -91,6 +91,7 @@ def load_pipeline_config(config_path: Path | str | None = None) -> dict[str, Any
         "run_evaluation": bool(pl.get("run_evaluation", False)),
         "save_onnx_weights": bool(pl.get("save_onnx_weights", False)),
         "run_packaging": bool(pl.get("run_packaging", True)),
+        "generate_plots": bool(pl.get("generate_plots", True)),
         # ── onnx export ──────────────────────────────────────────────────────
         "onnx_score_threshold": float(onnx.get("score_threshold", 0.05)),
         "onnx_iou_threshold": float(onnx.get("iou_threshold", 0.5)),

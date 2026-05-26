@@ -138,6 +138,7 @@ class RTMDetPipelineConfig:
     early_stopping: bool = False
     early_stopping_patience: int = 20
     early_stopping_min_delta: float = 0.001
+    generate_plots: bool = True
 
 
 def is_mmdet_root(path: str | Path | None) -> bool:
@@ -831,12 +832,14 @@ val_evaluator = dict(
     type='CocoMetric',
     ann_file=data_root + {str(val_ann).replace(chr(92), '/')!r},
     metric='bbox',
+    classwise=True,
     proposal_nums=(100, 1, 10),
 )
 test_evaluator = dict(
     type='CocoMetric',
     ann_file=data_root + {str(test_ann_rel).replace(chr(92), '/')!r},
     metric='bbox',
+    classwise=True,
     proposal_nums=(100, 1, 10),
 )
 
@@ -884,7 +887,7 @@ custom_hooks = [
         switch_pipeline=train_pipeline_stage2),
 {_build_early_stopping_hook(config)}]
 
-work_dir ={str((project_dir / config.model_name).resolve()).replace(chr(92), '/')!r}
+work_dir ={str((project_dir / config.model_name / "checkpoints").resolve()).replace(chr(92), '/')!r}
 """
 
     with output_config.open("w", encoding="utf-8") as stream:
@@ -1090,7 +1093,7 @@ def build_train_command(config: RTMDetPipelineConfig, mmdet_config: Path) -> lis
         str(train_script),
         str(mmdet_config),
         "--work-dir",
-        str(Path(config.project_dir).resolve() / config.model_name),
+        str(Path(config.project_dir).resolve() / config.model_name / "checkpoints"),
     ]
     if config.amp:
         command.append("--amp")
@@ -1100,16 +1103,147 @@ def build_train_command(config: RTMDetPipelineConfig, mmdet_config: Path) -> lis
 
 
 def find_latest_checkpoint(run_dir: Path) -> Path | None:
-    best_candidates = sorted(run_dir.glob("best_*.pth"), key=lambda path: path.stat().st_mtime)
-    if best_candidates:
-        return best_candidates[-1]
+    # Checkpoints live in run_dir/checkpoints/ for new runs;
+    # fall back to run_dir/ root for runs created before the layout change.
+    search_dirs = [run_dir / "checkpoints", run_dir]
 
-    latest = run_dir / "latest.pth"
-    if latest.is_file():
-        return latest
+    for search in search_dirs:
+        best = sorted(search.glob("best_*.pth"), key=lambda p: p.stat().st_mtime)
+        if best:
+            return best[-1]
+        latest = search / "latest.pth"
+        if latest.is_file():
+            return latest
+        epochs = sorted(search.glob("epoch_*.pth"), key=lambda p: p.stat().st_mtime)
+        if epochs:
+            return epochs[-1]
 
-    epoch_candidates = sorted(run_dir.glob("epoch_*.pth"), key=lambda path: path.stat().st_mtime)
-    return epoch_candidates[-1] if epoch_candidates else None
+    return None
+
+
+# Keys shown in the primary summary table, in display order.
+_COCO_SUMMARY_KEYS: list[tuple[str, str]] = [
+    ("coco/bbox_mAP_50",  "mAP50"),
+    ("coco/bbox_mAP",     "mAP50-95"),
+    ("coco/bbox_mAP_75",  "mAP75"),
+    ("coco/bbox_mAP_s",   "mAP-s"),
+    ("coco/bbox_mAP_m",   "mAP-m"),
+    ("coco/bbox_mAP_l",   "mAP-l"),
+]
+
+
+def parse_best_metrics_from_json_log(run_dir: Path) -> dict[str, Any] | None:
+    """Return the validation record with the highest coco/bbox_mAP from the MMEngine JSON log.
+
+    MMEngine writes scalars to {run_dir}/checkpoints/{timestamp}/vis_data/scalars.json for new
+    runs, and to {run_dir}/{timestamp}/vis_data/scalars.json for runs created before the layout
+    change. The most recently modified file across both locations wins.
+    """
+    log_files = sorted(
+        list(run_dir.glob("checkpoints/*/vis_data/scalars.json"))
+        or list(run_dir.glob("*/vis_data/scalars.json")),
+        key=lambda p: p.stat().st_mtime,
+    )
+    if not log_files:
+        return None
+
+    best_record: dict[str, Any] | None = None
+    best_map: float = -1.0
+
+    with log_files[-1].open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            raw = record.get("coco/bbox_mAP")
+            if raw is None:
+                continue
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if val > best_map:
+                best_map = val
+                best_record = record
+
+    return best_record
+
+
+def write_best_metrics_log(
+    out_dir: Path,
+    metrics: dict[str, Any],
+    checkpoint: Path | None,
+    class_names: list[str],
+) -> Path:
+    """Write a YOLO-style best-epoch metrics summary to {out_dir}/best_metrics.txt."""
+    shown_keys: set[str] = {k for k, _ in _COCO_SUMMARY_KEYS}
+    col_w = 11
+
+    def fmt(key: str) -> str:
+        v = metrics.get(key)
+        if v is None:
+            return "-"
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return "-"
+        return "-" if f < 0 else f"{f:.4f}"
+
+    epoch = metrics.get("step", metrics.get("epoch", "?"))
+    header = f"{'':>24}" + "".join(f"{lbl:>{col_w}}" for _, lbl in _COCO_SUMMARY_KEYS)
+    overall = f"{'all':>24}" + "".join(f"{fmt(k):>{col_w}}" for k, _ in _COCO_SUMMARY_KEYS)
+
+    lines: list[str] = [
+        f"Results saved to {out_dir.parent}",
+        "",
+        f"  Best epoch : {epoch}",
+        f"  Checkpoint : {checkpoint.name if checkpoint else 'N/A'}",
+        f"  Timestamp  : {datetime.now().isoformat(timespec='seconds')}",
+        "",
+        header,
+        overall,
+    ]
+
+    # Per-class AP rows (present when classwise=True in CocoMetric).
+    # MMDetection logs per-category metrics with keys like
+    # "coco/bbox_mAP_copypaste" (table string) or individual
+    # "coco/<cls>_precision" style keys — we probe the most common patterns.
+    for cls_name in class_names:
+        ap50_candidates = [
+            f"coco/bbox_mAP_50/{cls_name}",
+            f"coco/{cls_name}_ap50",
+            f"coco/bbox_{cls_name}_ap50",
+        ]
+        ap_candidates = [
+            f"coco/bbox_mAP/{cls_name}",
+            f"coco/{cls_name}_ap",
+            f"coco/bbox_{cls_name}_ap",
+        ]
+        val_50 = next((fmt(k) for k in ap50_candidates if k in metrics), None)
+        val_ap = next((fmt(k) for k in ap_candidates if k in metrics), None)
+        if val_50 is not None or val_ap is not None:
+            cls_vals = [val_50 or "-", val_ap or "-"] + ["-"] * (len(_COCO_SUMMARY_KEYS) - 2)
+            lines.append(f"{cls_name:>24}" + "".join(f"{v:>{col_w}}" for v in cls_vals))
+            shown_keys.update(ap50_candidates + ap_candidates)
+
+    # All remaining coco/* numeric metrics not already displayed.
+    extra = {
+        k: v for k, v in sorted(metrics.items())
+        if k.startswith("coco/") and k not in shown_keys and isinstance(v, (int, float)) and float(v) >= 0
+    }
+    if extra:
+        lines += ["", "Additional metrics:"]
+        for k, v in extra.items():
+            lines.append(f"  {k}: {float(v):.4f}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "best_metrics.txt"
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_path
 
 
 def build_test_command(
@@ -1119,14 +1253,15 @@ def build_test_command(
     split: str,
 ) -> list[str]:
     test_script = find_mmdet_tool(config, "test.py")
-    out_file = Path(config.project_dir).resolve() / config.model_name / f"{split}_predictions.pkl"
+    eval_dir = Path(config.project_dir).resolve() / config.model_name / "eval" / split
+    out_file = eval_dir / f"{split}_predictions.pkl"
     return [
         str(config.python_executable),
         str(test_script),
         str(mmdet_config),
         str(checkpoint),
         "--work-dir",
-        str(Path(config.project_dir).resolve() / config.model_name / f"eval_{split}"),
+        str(eval_dir),
         "--out",
         str(out_file),
     ]
@@ -1188,7 +1323,7 @@ def build_export_command(
         Path(config.sample_image).resolve() if config.sample_image
         else first_sample_image(validation)
     )
-    export_dir = Path(config.project_dir).resolve() / config.model_name / "export_tensorrt"
+    export_dir = Path(config.project_dir).resolve() / config.model_name / "export"
 
     return [
         str(config.python_executable),
@@ -1235,7 +1370,7 @@ def package_model_artifacts(
     if checkpoint and checkpoint.is_file():
         shutil.copy2(checkpoint, package_root / checkpoint.name)
 
-    export_dir = Path(config.project_dir).resolve() / config.model_name / "export_tensorrt"
+    export_dir = Path(config.project_dir).resolve() / config.model_name / "export"
     for artifact_name in ("end2end.onnx", "end2end.engine", "pipeline.json", "deploy.json"):
         artifact = export_dir / artifact_name
         if artifact.is_file():
@@ -1350,6 +1485,13 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
         else:
             print("WARNING: no checkpoint found after training.")
 
+        best_metrics = parse_best_metrics_from_json_log(run_dir)
+        if best_metrics:
+            metrics_log = write_best_metrics_log(run_dir / "metrics", best_metrics, checkpoint, validation.class_names)
+            print(f"Best metrics log: {metrics_log}")
+        else:
+            print("WARNING: could not parse best metrics from training log.")
+
     if config.checkpoint_for_export:
         checkpoint = Path(config.checkpoint_for_export).resolve()
 
@@ -1370,7 +1512,7 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
                 if config.sample_image
                 else first_sample_image(validation)
             )
-            onnx_dir = Path(config.project_dir).resolve() / config.model_name / "export_onnx"
+            onnx_dir = Path(config.project_dir).resolve() / config.model_name / "export"
             mmdet_root_path = Path(config.mmdet_root).resolve() if config.mmdet_root else None
 
             onnx_file = run_onnx_export(
@@ -1397,6 +1539,21 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
             export_command,
             cwd=Path(config.mmdeploy_root).resolve() if config.mmdeploy_root else None,
         )
+
+    # Generate plots (training curves, per-class mAP, confusion matrix)
+    if config.generate_plots:
+        try:
+            from .plots import generate_plots
+            plot_files = generate_plots(
+                run_dir=run_dir,
+                class_names=validation.class_names,
+                coco_val_ann=coco_annotations.get("val"),
+                model_name=config.model_name,
+            )
+            for p in plot_files:
+                print(f"Plot: {p}")
+        except Exception as exc:
+            print(f"WARNING: plot generation failed: {exc}")
 
     if config.run_packaging:
         package_root = package_model_artifacts(config, validation, mmdet_config, checkpoint)
