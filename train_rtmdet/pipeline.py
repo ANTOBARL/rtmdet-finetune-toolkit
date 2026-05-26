@@ -442,10 +442,25 @@ def parse_yolo_label_file(
                     f"{label_path}:{line_number} class_id {class_id} out of range "
                     f"0..{class_count - 1}."
                 )
+
+            # Zero-area boxes (degenerate segments where all points coincide) are
+            # silently dropped — they carry no training signal and cannot be fixed.
             if width <= 0 or height <= 0:
-                errors.append(f"{label_path}:{line_number} width/height must be > 0.")
-            if not (0 <= xc <= 1 and 0 <= yc <= 1 and 0 < width <= 1 and 0 < height <= 1):
-                errors.append(f"{label_path}:{line_number} coordinates not normalized to [0, 1].")
+                continue
+
+            # Clamp tiny floating-point overruns (e.g. 1.0000000001 → 1.0) that
+            # arise from segment-to-bbox conversion.  Truly out-of-range values
+            # (further than 1e-4 from the boundary) are still reported as errors.
+            _tol = 1e-4
+            if not (-_tol <= xc <= 1 + _tol and -_tol <= yc <= 1 + _tol
+                    and -_tol < width <= 1 + _tol and -_tol < height <= 1 + _tol):
+                errors.append(f"{label_path}:{line_number} coordinates out of range: "
+                               f"xc={xc:.4f} yc={yc:.4f} w={width:.4f} h={height:.4f}.")
+                continue
+            xc = max(0.0, min(1.0, xc))
+            yc = max(0.0, min(1.0, yc))
+            width = max(0.0, min(1.0, width))
+            height = max(0.0, min(1.0, height))
 
             rows.append(
                 {
@@ -539,6 +554,111 @@ def maybe_normalize_dataset(dataset_root: Path) -> None:
     print("Normalizing filenames...")
     execute_rename_plan(rename_plan)
     print("Normalization complete.")
+
+
+def fix_yolo_labels(dataset_root: Path) -> None:
+    """Fix degenerate YOLO annotations in-place across all splits.
+
+    Two corrections are applied:
+    - Zero-area boxes (w=0 or h=0): the annotation line is removed entirely.
+      These arise from segment polygons where all points coincide; they carry
+      no training signal and cannot be repaired.
+    - Coordinates with a tiny floating-point overrun outside [0, 1] (tolerance
+      1e-4): clamped to the valid range.  Coordinates further out of range are
+      left untouched so the validator can report them.
+
+    Only files that actually change are rewritten.
+    """
+    _tol = 1e-4
+
+    total_removed = 0
+    total_clamped = 0
+    total_files = 0
+
+    for split_dir in sorted(dataset_root.iterdir()):
+        if not split_dir.is_dir():
+            continue
+        labels_dir = split_dir / "labels"
+        if not labels_dir.is_dir():
+            continue
+
+        for label_file in sorted(labels_dir.glob("*.txt")):
+            original = label_file.read_text(encoding="utf-8").splitlines()
+            new_lines: list[str] = []
+            removed = 0
+            clamped = 0
+
+            for raw in original:
+                line = raw.strip()
+                if not line:
+                    continue
+
+                parts = line.split()
+
+                # ── Detect format ────────────────────────────────────────────
+                is_bbox = len(parts) == 5
+                is_seg = len(parts) >= 7 and (len(parts) - 1) % 2 == 0
+
+                if not (is_bbox or is_seg):
+                    new_lines.append(line)
+                    continue
+
+                try:
+                    cls_id = parts[0]
+                    coords = [float(p) for p in parts[1:]]
+                except ValueError:
+                    new_lines.append(line)
+                    continue
+
+                if is_bbox:
+                    xc, yc, w, h = coords
+                else:
+                    # Segment → derive bbox to check area
+                    xs = coords[0::2]
+                    ys = coords[1::2]
+                    w = max(xs) - min(xs)
+                    h = max(ys) - min(ys)
+                    xc = yc = 0.0  # not used further for segments
+
+                # ── Drop zero-area annotations ───────────────────────────────
+                if w <= 0 or h <= 0:
+                    removed += 1
+                    continue
+
+                # ── Clamp tiny float overruns (bbox only) ────────────────────
+                if is_bbox:
+                    xc, yc, w, h = coords
+                    needs_clamp = (
+                        not (0 <= xc <= 1 and 0 <= yc <= 1
+                             and 0 < w <= 1 and 0 < h <= 1)
+                        and (-_tol <= xc <= 1 + _tol and -_tol <= yc <= 1 + _tol
+                             and -_tol < w <= 1 + _tol and -_tol < h <= 1 + _tol)
+                    )
+                    if needs_clamp:
+                        xc = max(0.0, min(1.0, xc))
+                        yc = max(0.0, min(1.0, yc))
+                        w  = max(1e-6, min(1.0, w))
+                        h  = max(1e-6, min(1.0, h))
+                        new_lines.append(f"{cls_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}")
+                        clamped += 1
+                        continue
+
+                new_lines.append(line)
+
+            if removed or clamped:
+                text = "\n".join(new_lines)
+                label_file.write_text(text + "\n" if text else "", encoding="utf-8")
+                total_files += 1
+                total_removed += removed
+                total_clamped += clamped
+
+    if total_removed or total_clamped:
+        print(
+            f"Annotation fix: {total_removed} zero-area box(es) removed, "
+            f"{total_clamped} coordinate(s) clamped — {total_files} file(s) rewritten."
+        )
+    else:
+        print("Annotation fix: no issues found.")
 
 
 def yolo_box_to_coco_bbox(
@@ -1440,6 +1560,9 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
     dataset_root, _yaml_path = resolve_dataset_root(config.dataset_path)
     if config.normalize_names:
         maybe_normalize_dataset(dataset_root)
+
+    print("\nFixing annotations...")
+    fix_yolo_labels(dataset_root)
 
     validation = validate_yolo_dataset(config)
     print_validation_summary(validation)
