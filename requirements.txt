@@ -1,10 +1,10 @@
 # ==============================================================================
 # Requirements — train-rtmdet
-# Hardware: NVIDIA RTX 4090  |  CUDA 11.8  |  PyTorch 2.1
+# Hardware: NVIDIA GPU  |  CUDA 11.8  |  PyTorch 2.2
 #
-# NOTE: CUDA 11.8 is used instead of 12.x because OpenMMLab does not publish
-# mmcv binary wheels for Windows on CUDA 12.x.  The RTX 4090 runs CUDA 11.8
-# without any performance penalty.
+# NOTE: torch 2.1.0+cu118 was removed from the PyTorch index.
+# Bumped to 2.2.2+cu118 — the nearest available stable release.
+# mmcv find-links URL updated accordingly (torch2.2.0 bucket).
 #
 # Install order (run from the repo root with the target conda/venv active):
 #
@@ -21,18 +21,18 @@
 
 # ── PyTorch GPU — CUDA 11.8 ───────────────────────────────────────────────────
 --extra-index-url https://download.pytorch.org/whl/cu118
-torch==2.1.0+cu118
-torchvision==0.16.0+cu118
-torchaudio==2.1.0+cu118
+torch==2.2.2+cu118
+torchvision==0.17.2+cu118
+torchaudio==2.2.2+cu118
 
 
 # ── OpenMMLab core ────────────────────────────────────────────────────────────
 mmengine>=0.10.0,<1.0
-setuptools==68.2.2              # torch 2.1 uses pkg_resources (removed in setuptools 70+)
+setuptools>=68.2.2,<70         # keep below 70 to avoid pkg_resources removal issues
 
-# mmcv is not on PyPI as a Windows binary.  The wheel is served from the OpenMMLab CDN.
+# mmcv is not on PyPI as a Linux binary.  The wheel is served from the OpenMMLab CDN.
 # The find-links URL encodes the exact (CUDA, Torch) pair — keep in sync with torch above.
---find-links https://download.openmmlab.com/mmcv/dist/cu118/torch2.1.0/index.html
+--find-links https://download.openmmlab.com/mmcv/dist/cu118/torch2.2.0/index.html
 mmcv==2.1.0
 
 # mmdet is installed from the local clone in step 2 above.
