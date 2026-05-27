@@ -53,6 +53,8 @@ def main() -> None:
     print(f"Upscale        : {dim_cfg.allow_upscale}")
     print(f"Max new images : {dim_cfg.max_new_images}")
     print(f"Max new %      : {dim_cfg.max_new_images_percent}")
+    print(f"Balance classes: {dim_cfg.balance_classes}"
+          + (f"  (weight={dim_cfg.balance_classes_weight})" if dim_cfg.balance_classes else ""))
     print()
 
     manifest = generate_augmented_dataset(
@@ -69,6 +71,9 @@ def main() -> None:
         print(f"  generated_images: {result.get('generated_images', 0)}")
         print(f"  initial_dist    : {result.get('initial_distribution')}")
         print(f"  final_dist      : {result.get('final_distribution')}")
+        if result.get("initial_class_distribution") is not None:
+            print(f"  initial_class   : {result.get('initial_class_distribution')}")
+            print(f"  final_class     : {result.get('final_class_distribution')}")
         print()
 
     print(f"Saved to: {dst_root}")

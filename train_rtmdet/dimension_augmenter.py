@@ -54,6 +54,9 @@ class SizeAugmenterConfig:
     min_bbox_area_px2: float = 16.0
     skip_images_without_labels: bool = True
     stop_when_within_tolerance: bool = True
+    # class balancing
+    balance_classes: bool = True
+    balance_classes_weight: float = 2.0
 
 
 @dataclass
@@ -154,6 +157,8 @@ def load_dimension_config(config_path: Path) -> SizeAugmenterConfig:
         min_bbox_area_px2=float(filters.get("min_bbox_area_px2", 16.0)),
         skip_images_without_labels=bool(filters.get("skip_images_without_labels", True)),
         stop_when_within_tolerance=bool(section.get("stop_when_within_tolerance", True)),
+        balance_classes=bool(section.get("balance_classes", True)),
+        balance_classes_weight=float(section.get("balance_classes_weight", 2.0)),
     )
 
     if cfg.padding_mode != "constant":
@@ -363,6 +368,7 @@ def choose_candidate(
     cfg: SizeAugmenterConfig,
     usage_counts: dict[Path, int],
     rng: random.Random,
+    class_counts: dict[int, int] | None = None,
 ) -> tuple[SourceImageRecord, float] | None:
     scored: list[tuple[float, SourceImageRecord, tuple[float, float]]] = []
 
@@ -379,7 +385,11 @@ def choose_candidate(
         useful_objects = _useful_source_objects(rec, target_bin)
         if useful_objects <= 0:
             continue
-        score = useful_objects + rng.random() * 0.05
+
+        score = float(useful_objects)
+        if cfg.balance_classes and class_counts:
+            score += _class_balance_score(rec, class_counts, cfg.balance_classes_weight)
+        score += rng.random() * 0.05
         scored.append((score, rec, scale_range))
 
     if not scored:
@@ -401,6 +411,52 @@ def _useful_source_objects(rec: SourceImageRecord, target_bin: str) -> int:
     if target_bin == "medium":
         return rec.size_counts[large_idx] + rec.size_counts[small_idx]
     return rec.size_counts[medium_idx] + rec.size_counts[small_idx]
+
+
+def _count_class_objects(records: list[SourceImageRecord]) -> dict[int, int]:
+    """Count total annotations per class_id across all records."""
+    counts: dict[int, int] = {}
+    for rec in records:
+        for ann in rec.annotations:
+            counts[ann.class_id] = counts.get(ann.class_id, 0) + 1
+    return counts
+
+
+def _class_distribution_from_counts(class_counts: dict[int, int]) -> dict[str, float]:
+    """Return fractional distribution {str(class_id): fraction} sorted by class_id."""
+    total = sum(class_counts.values())
+    if total == 0:
+        return {}
+    return {
+        str(cls_id): round(count / total, 4)
+        for cls_id, count in sorted(class_counts.items())
+    }
+
+
+def _class_balance_score(
+    rec: SourceImageRecord,
+    class_counts: dict[int, int],
+    weight: float,
+) -> float:
+    """Extra score for images that contain objects of under-represented classes.
+
+    For each annotation in *rec* we compute the normalised deficit of that
+    class relative to the ideal equal split, then multiply by *weight*.
+    Images rich in rare classes therefore rank higher in candidate selection.
+    """
+    if not rec.annotations or not class_counts:
+        return 0.0
+    total = sum(class_counts.values())
+    num_classes = len(class_counts)
+    if num_classes <= 1 or total == 0:
+        return 0.0
+    ideal = total / num_classes
+    bonus = 0.0
+    for ann in rec.annotations:
+        count = class_counts.get(ann.class_id, 0)
+        deficit = max(0.0, ideal - count) / ideal   # 0 when at/above ideal, 1 when count=0
+        bonus += deficit * weight
+    return bonus
 
 
 def _candidate_scale_range(
@@ -566,6 +622,18 @@ def augment_split(
     initial_distribution = distribution_from_counts(initial_counts)
     max_new_images = resolve_max_new_images(records, cfg)
 
+    # ── class-balance tracking ────────────────────────────────────────────────
+    initial_class_counts: dict[int, int] = {}
+    if cfg.balance_classes:
+        raw_class_counts = _count_class_objects(records)
+        if cfg.preserve_originals:
+            initial_class_counts = raw_class_counts
+        # even when not preserving originals we still use the source distribution
+        # as the starting reference for scoring, but report 0 in the manifest
+        class_counts: dict[int, int] = dict(initial_class_counts) if cfg.preserve_originals else dict.fromkeys(raw_class_counts, 0)
+    else:
+        class_counts = {}
+
     generated = 0
     usage_counts: dict[Path, int] = {}
     accepted_samples: list[GeneratedSample] = []
@@ -584,7 +652,10 @@ def augment_split(
         if target_bin is None:
             break
 
-        choice = choose_candidate(records, target_bin, cfg, usage_counts, rng)
+        choice = choose_candidate(
+            records, target_bin, cfg, usage_counts, rng,
+            class_counts=class_counts if cfg.balance_classes else None,
+        )
         if choice is None:
             break
         source, scale = choice
@@ -621,6 +692,12 @@ def augment_split(
         _write_generated_sample(sample, images_dir, labels_dir, cfg)
         accepted_samples.append(sample)
         current_counts = [a + b for a, b in zip(current_counts, size_counts)]
+
+        # update per-class counters for the next candidate selection
+        if cfg.balance_classes:
+            for ann in sample.annotations:
+                class_counts[ann.class_id] = class_counts.get(ann.class_id, 0) + 1
+
         generated += 1
         last_progress_pct = _print_progress(
             generated, max_new_images, split_label, last_progress_pct
@@ -630,7 +707,7 @@ def augment_split(
         print()
 
     final_distribution = distribution_from_counts(current_counts)
-    return {
+    result: dict[str, object] = {
         "status": "ok",
         "source_split_path": str(src_root / (_split_folder_name(src_root, split_label) or split_label)),
         "initial_counts": dict(zip(size_bin_names(), initial_counts)),
@@ -650,6 +727,12 @@ def augment_split(
             for sample in accepted_samples
         ],
     }
+
+    if cfg.balance_classes:
+        result["initial_class_distribution"] = _class_distribution_from_counts(initial_class_counts)
+        result["final_class_distribution"] = _class_distribution_from_counts(class_counts)
+
+    return result
 
 
 def _clear_split_contents(images_dir: Path, labels_dir: Path) -> None:

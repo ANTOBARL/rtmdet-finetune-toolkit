@@ -21,7 +21,7 @@ dimension_augmenter:
   #   balance_dataset.py
   #   normalize_dataset.py
   #   augment_by_size.py
-  dataset_path: 'C:\Users\AntonioreneèBarletta\Desktop\dataset_vision_ripuliti\bootstrap_vest_dimension_augmented'
+  dataset_path: 'C:\Users\AntonioreneèBarletta\Desktop\dataset_vision_ripuliti\ppe_person_5class_final'
 
   # Desired COCO-style size distribution over object annotations.
   # Must sum to 1.0.
@@ -95,3 +95,12 @@ dimension_augmenter:
   # If false, the script will continue generating until max_new_images even if
   # tolerance is already reached.
   stop_when_within_tolerance: true
+
+  # When true, candidate images are scored with a bonus for containing objects
+  # of under-represented classes so every class grows at roughly the same rate.
+  # Strongly recommended when the dataset is already class-imbalanced.
+  # balance_classes_weight controls how much class balance is weighted
+  # versus the size-balance score (default 2.0).
+  # Set to false to restore the original size-only behaviour.
+  balance_classes: true
+  balance_classes_weight: 2.0
