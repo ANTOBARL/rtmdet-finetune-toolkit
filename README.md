@@ -157,6 +157,15 @@ Everything else has a working default. See the [Configuration reference](#config
 
 ### Step 1 — Normalize dataset filenames
 
+Steps 1 through 1.6 read `dataset_workflow_config.yaml`, a separate personal config (git-ignored,
+same pattern as `hyperparameter_config.yaml`). Copy the template once:
+
+```bash
+cp dataset_workflow_config.template.yaml dataset_workflow_config.yaml
+```
+
+then set `dimension_augmenter.dataset_path` to your dataset root.
+
 ```bash
 python normalize_dataset.py
 ```

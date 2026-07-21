@@ -1,9 +1,12 @@
 # =============================================================================
-# Dataset workflow configuration
+# Dataset workflow configuration — TEMPLATE
+# Copy this file to dataset_workflow_config.yaml and fill in your paths:
+#   cp dataset_workflow_config.template.yaml dataset_workflow_config.yaml
+#
 # Preferred config file for dataset analysis / balancing / normalization /
 # size-based augmentation.
 #
-# Edit this file, then run:
+# Edit dataset_workflow_config.yaml, then run:
 #   python analyze_dataset.py
 #   python balance_dataset.py
 #   python normalize_dataset.py
@@ -21,7 +24,7 @@ dimension_augmenter:
   #   balance_dataset.py
   #   normalize_dataset.py
   #   augment_by_size.py
-  dataset_path: 'C:\Users\AntonioreneèBarletta\Desktop\dataset_vision_ripuliti\ppe_person_5class_final'
+  dataset_path: 'C:\path\to\your\dataset'
 
   # Desired COCO-style size distribution over object annotations.
   # Must sum to 1.0.
