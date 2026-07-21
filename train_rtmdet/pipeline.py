@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -853,6 +854,35 @@ def _build_early_stopping_hook(config: RTMDetPipelineConfig) -> str:
     )
 
 
+_TIMESTAMP_DIR_RE = re.compile(r"^\d{8}_\d{6}$")
+
+
+def tidy_checkpoints_dir(run_dir: Path) -> None:
+    """Move MMEngine's own housekeeping out of checkpoints/ into logs/.
+
+    MMEngine is given checkpoints/ as its --work-dir, so alongside the
+    actual epoch_*.pth / best_*.pth files it also drops one timestamped
+    folder per launch (vis_data/scalars.json, a dumped copy of the config,
+    log.json, ...) plus a loose copy of the config .py — that's what turns
+    checkpoints/ into a mix of run metadata and checkpoint files. This
+    relocates the metadata to run_dir/logs/, leaving checkpoints/ with only
+    .pth files and the last_checkpoint marker. Safe to call repeatedly —
+    already-moved runs are simply skipped.
+    """
+    checkpoints_dir = run_dir / "checkpoints"
+    if not checkpoints_dir.is_dir():
+        return
+    logs_dir = run_dir / "logs"
+
+    for entry in checkpoints_dir.iterdir():
+        if entry.is_dir() and _TIMESTAMP_DIR_RE.match(entry.name):
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(entry), str(logs_dir / entry.name))
+        elif entry.is_file() and entry.suffix == ".py":
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(entry), str(logs_dir / entry.name))
+
+
 def generate_mmdet_config(
     config: RTMDetPipelineConfig,
     validation: DatasetValidationResult,
@@ -1255,12 +1285,15 @@ _COCO_SUMMARY_KEYS: list[tuple[str, str]] = [
 def parse_best_metrics_from_json_log(run_dir: Path) -> dict[str, Any] | None:
     """Return the validation record with the highest coco/bbox_mAP from the MMEngine JSON log.
 
-    MMEngine writes scalars to {run_dir}/checkpoints/{timestamp}/vis_data/scalars.json for new
-    runs, and to {run_dir}/{timestamp}/vis_data/scalars.json for runs created before the layout
-    change. The most recently modified file across both locations wins.
+    MMEngine writes scalars to {timestamp}/vis_data/scalars.json under whichever directory it
+    was given as --work-dir. tidy_checkpoints_dir() relocates those timestamped folders to
+    {run_dir}/logs/ after training, so that's checked first; the two older layouts
+    ({run_dir}/checkpoints/{timestamp}/... and {run_dir}/{timestamp}/...) are kept as fallbacks
+    for runs that predate that move. The most recently modified file across all wins.
     """
     log_files = sorted(
-        list(run_dir.glob("checkpoints/*/vis_data/scalars.json"))
+        list(run_dir.glob("logs/*/vis_data/scalars.json"))
+        or list(run_dir.glob("checkpoints/*/vis_data/scalars.json"))
         or list(run_dir.glob("*/vis_data/scalars.json")),
         key=lambda p: p.stat().st_mtime,
     )
@@ -1608,6 +1641,7 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
             train_command,
             cwd=Path(config.mmdet_root).resolve() if config.mmdet_root else None,
         )
+        tidy_checkpoints_dir(run_dir)
         checkpoint = find_latest_checkpoint(run_dir)
         if checkpoint:
             print(f"Selected checkpoint: {checkpoint}")

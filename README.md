@@ -262,24 +262,42 @@ Internally the pipeline runs these steps in order:
 After a successful run:
 
 ```
+runs/rtmdet/_configs/
+└── <model_name>_rtmdet_s_<timestamp>.py        ← generated MMDetection config (one per launch)
+
 runs/rtmdet/<model_name>/
-├── _configs/
-│   └── <model_name>_rtmdet_s_<timestamp>.py   ← generated MMDetection config
-├── best_coco_bbox_mAP_epoch_N.pth              ← best checkpoint
-├── latest.pth
-├── export_onnx/                                ← present if save_onnx_weights: true
+├── checkpoints/                                ← .pth files only, nothing else
+│   ├── best_coco_bbox_mAP_epoch_N.pth          ← lightweight: weights + meta only
+│   ├── best_coco_bbox_mAP_epoch_N_weights_only.pth  ← auto-generated, see "Checkpoint formats" below
+│   ├── epoch_N.pth, epoch_N-1.pth, ...          ← full training state (weights+optimizer+scheduler)
+│   └── last_checkpoint                          ← marker file MMEngine uses for --resume
+├── logs/<timestamp>/                            ← MMEngine's own housekeeping, one folder per launch
+│   ├── vis_data/scalars.json                    ← raw metrics log (used by plots + best-metrics parsing)
+│   └── <config>.py                              ← dumped copy of the config used for that launch
+├── metrics/
+│   ├── best_metrics.txt                         ← YOLO-style summary of the best epoch
+│   └── plots/                                   ← present if generate_plots: true
+│       ├── training_curves.png
+│       ├── per_class_map50.png
+│       └── confusion_matrix.png                 ← present if run_evaluation: true
+├── export/                                      ← present if save_onnx_weights: true
 │   ├── end2end.onnx
 │   ├── pipeline.json
 │   └── deploy.json
-└── rtmdet_pipeline_manifest.json               ← full run metadata (paths, commands, stats)
+└── rtmdet_pipeline_manifest.json                ← full run metadata (paths, commands, stats)
 
-models/rtmdet/<model_name>/                     ← packaged artifacts
+models/rtmdet/<model_name>/                      ← packaged artifacts
 ├── <config>.py
-├── best_coco_bbox_mAP_epoch_N.pth
+├── best_coco_bbox_mAP_epoch_N_weights_only.pth  ← packaged checkpoint is always the weights-only one
 ├── classes.txt
-├── end2end.onnx                                ← present if save_onnx_weights: true
+├── end2end.onnx                                 ← present if save_onnx_weights: true
 └── metadata.json
 ```
+
+`checkpoints/` and `logs/` used to be the same folder (MMEngine's `--work-dir`), which mixed per-launch
+metadata in with the actual `.pth` files. The pipeline now moves MMEngine's housekeeping into `logs/`
+after training (`tidy_checkpoints_dir` in `train_rtmdet/pipeline.py`) so `checkpoints/` only ever holds
+checkpoint files. Runs from before this change keep their old flat layout; nothing needs migrating.
 
 ---
 

@@ -46,10 +46,11 @@ def _iter_scalars(run_dir: Path):
     When multiple timestamp directories exist (resumed runs), the most recently
     modified file wins.
     """
-    # New layout: checkpoints/{timestamp}/vis_data/scalars.json
-    # Old layout (backward compat): {timestamp}/vis_data/scalars.json
+    # Current layout: logs/{timestamp}/vis_data/scalars.json (see tidy_checkpoints_dir
+    # in pipeline.py). Older layouts kept as fallback for runs from before that move.
     log_files = sorted(
-        list(run_dir.glob("checkpoints/*/vis_data/scalars.json"))
+        list(run_dir.glob("logs/*/vis_data/scalars.json"))
+        or list(run_dir.glob("checkpoints/*/vis_data/scalars.json"))
         or list(run_dir.glob("*/vis_data/scalars.json")),
         key=lambda p: p.stat().st_mtime,
     )
