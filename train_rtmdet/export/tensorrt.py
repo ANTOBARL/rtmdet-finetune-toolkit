@@ -3,8 +3,8 @@
 #
 # To enable TensorRT export:
 #   1. Install MMDeploy from source with TensorRT support.
-#   2. Set run_export = true in iperparameter_config.txt.
-#   3. Set mmdeploy_root in iperparameter_config.txt.
+#   2. Set run_export = true in hyperparameter_config.yaml.
+#   3. Set mmdeploy_root in hyperparameter_config.yaml.
 #   4. Ensure TENSORRT_DIR, CUDNN_DIR are set and trtexec is in PATH.
 #   5. Run export_rtmdet_to_tensorrt.py from the project root.
 #

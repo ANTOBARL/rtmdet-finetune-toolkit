@@ -1,7 +1,7 @@
 """
 Step 2 of 2 — Fine-tune RTMDet on a custom YOLO dataset.
 
-All hyperparameters and paths are read from iperparameter_config.txt.
+All hyperparameters and paths are read from hyperparameter_config.yaml.
 Edit that file before running this script.
 
 Usage:

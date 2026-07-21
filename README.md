@@ -18,8 +18,8 @@ All variants use the **CSPNeXt backbone**, are pretrained on COCO, and are relea
 | RTMDet-l    | `l`    | 51.5 | 52.3 M | 80.2 G | 2.44 ms | 10.32 ms |
 | RTMDet-x    | `x`    | 52.8 | 94.9 M | 141.7 G | 3.10 ms | 18.80 ms |
 
-¹ TensorRT 8.4.3 · cuDNN 8.2.0 · FP16 · batch size 1 · **NMS escluso** · input 640×640.  
-Fonte: [OpenMMLab MMDetection — RTMDet model zoo](https://github.com/open-mmlab/mmdetection/tree/main/configs/rtmdet)
+¹ TensorRT 8.4.3 · cuDNN 8.2.0 · FP16 · batch size 1 · **NMS excluded** · input 640×640.  
+Source: [OpenMMLab MMDetection — RTMDet model zoo](https://github.com/open-mmlab/mmdetection/tree/main/configs/rtmdet)
 
 To select a variant set `variant` in `hyperparameter_config.yaml` under `model`.
 

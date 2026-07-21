@@ -286,7 +286,7 @@ def resolve_class_names(config: RTMDetPipelineConfig, yaml_path: Path | None) ->
 
     raise ValueError(
         "Cannot determine class names. Add a data.yaml with 'names', "
-        "or set class_names / nc in iperparameter_config.txt."
+        "or set class_names / nc in hyperparameter_config.yaml."
     )
 
 
@@ -1073,7 +1073,7 @@ def find_mmdet_tool(config: RTMDetPipelineConfig, tool_name: str) -> Path:
     if not mmdet_root:
         raise ValueError(
             "MMDetection is not configured. "
-            "Set mmdet_root in iperparameter_config.txt to the path of your "
+            "Set mmdet_root in hyperparameter_config.yaml to the path of your "
             "MMDetection clone (the folder containing tools/train.py). "
             "Example: mmdet_root = C:\\Users\\name\\Desktop\\mmdetection"
         )
@@ -1181,7 +1181,7 @@ def verify_tensorrt_backend(config: RTMDetPipelineConfig) -> None:
         return
 
     if not config.mmdeploy_root:
-        raise ValueError("Set mmdeploy_root in iperparameter_config.txt for TensorRT export.")
+        raise ValueError("Set mmdeploy_root in hyperparameter_config.yaml for TensorRT export.")
 
     check_script = """
 import json, os, shutil
