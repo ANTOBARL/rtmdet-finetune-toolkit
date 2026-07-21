@@ -99,13 +99,14 @@ class RTMDetPipelineConfig:
     imgsz: int = 640
     logger_interval: int = 10
     epochs: int = 100
-    stage2_epochs: int = 10
+    stage2_epochs: int = 35
     batch_size: int = 16
     workers: int = 8
     val_batch_size: int = 8
     val_interval: int = 5
     base_lr: float = 0.001
-    device: str = "cuda:0"
+    device: str = "cuda"
+    num_gpus: int = 1
     seed: int = 1
     project_dir: str | Path = field(default_factory=lambda: Path.cwd() / "runs" / "rtmdet")
     package_dir: str | Path = field(default_factory=lambda: Path.cwd() / "models" / "rtmdet")
@@ -140,6 +141,8 @@ class RTMDetPipelineConfig:
     early_stopping_patience: int = 20
     early_stopping_min_delta: float = 0.001
     generate_plots: bool = True
+    eval_conf_threshold: float = 0.25
+    eval_iou_threshold: float = 0.50
 
 
 def is_mmdet_root(path: str | Path | None) -> bool:
@@ -789,11 +792,8 @@ def get_variant_info(variant: str) -> dict[str, str]:
 def resolve_base_config(config: RTMDetPipelineConfig) -> str:
     variant_info = get_variant_info(config.variant)
     base_config_name = variant_info["base_config"]
-
-    if config.mmdet_root:
-        base_path = Path(config.mmdet_root).resolve() / "configs" / "rtmdet" / base_config_name
-        return str(base_path)
-
+    # Use the portable mmdet:: notation so the generated config works on any
+    # machine regardless of where mmdetection is cloned or installed.
     return f"mmdet::rtmdet/{base_config_name}"
 
 
@@ -912,6 +912,8 @@ def generate_mmdet_config(
     stage2_epochs = max(1, min(int(config.stage2_epochs), max_epochs))
     val_interval = max(1, int(config.val_interval))
     switch_epoch = max(1, max_epochs - stage2_epochs)
+    # keep every stage-2 checkpoint so the SWA script has enough to average
+    swa_keep = max(3, -(-stage2_epochs // val_interval) + 1)
 
     config_text = f"""# Auto-generated RTMDet fine-tuning config.
 # Source dataset: {dataset_root}
@@ -1019,7 +1021,7 @@ param_scheduler = [
 ]
 
 default_hooks = dict(
-    checkpoint=dict(interval=interval, max_keep_ckpts=3, save_best='coco/bbox_mAP'),
+    checkpoint=dict(interval=interval, max_keep_ckpts={swa_keep}, save_best='coco/bbox_mAP'),
     logger=dict(interval={int(config.logger_interval)}, type='LoggerHook'),
     timer=dict(type='IterTimerHook'),
 )
@@ -1238,13 +1240,26 @@ print(json.dumps(payload))
 
 def build_train_command(config: RTMDetPipelineConfig, mmdet_config: Path) -> list[str]:
     train_script = find_mmdet_tool(config, "train.py")
-    command = [
-        str(config.python_executable),
-        str(train_script),
-        str(mmdet_config),
-        "--work-dir",
-        str(Path(config.project_dir).resolve() / config.model_name / "checkpoints"),
-    ]
+    work_dir = str(Path(config.project_dir).resolve() / config.model_name / "checkpoints")
+
+    if config.num_gpus > 1:
+        command = [
+            str(config.python_executable),
+            "-m", "torch.distributed.run",
+            f"--nproc_per_node={config.num_gpus}",
+            str(train_script),
+            str(mmdet_config),
+            "--work-dir", work_dir,
+            "--launcher", "pytorch",
+        ]
+    else:
+        command = [
+            str(config.python_executable),
+            str(train_script),
+            str(mmdet_config),
+            "--work-dir", work_dir,
+        ]
+
     if config.amp:
         command.append("--amp")
     if config.resume:
@@ -1362,16 +1377,18 @@ def write_best_metrics_log(
     ]
 
     # Per-class AP rows (present when classwise=True in CocoMetric).
-    # MMDetection logs per-category metrics with keys like
-    # "coco/bbox_mAP_copypaste" (table string) or individual
-    # "coco/<cls>_precision" style keys — we probe the most common patterns.
+    # MMDetection 3.x logs per-category AP50-95 as "coco/{cls}_precision"
+    # (misleading name from the COCO API — it is NOT true Precision).
+    # We probe that key first, then fall back to alternative naming conventions.
     for cls_name in class_names:
         ap50_candidates = [
             f"coco/bbox_mAP_50/{cls_name}",
             f"coco/{cls_name}_ap50",
             f"coco/bbox_{cls_name}_ap50",
         ]
+        # "coco/{cls}_precision" is the actual MMDet 3.x classwise AP50-95 key
         ap_candidates = [
+            f"coco/{cls_name}_precision",
             f"coco/bbox_mAP/{cls_name}",
             f"coco/{cls_name}_ap",
             f"coco/bbox_{cls_name}_ap",
@@ -1575,7 +1592,7 @@ def write_run_manifest(
         ),
     }
 
-    if config.mmdeploy_root:
+    if config.mmdeploy_root and config.save_onnx_weights:
         manifest["deploy_config_hint"] = str(resolve_deploy_config(config))
     manifest["jetson_benchmark_hint"] = build_trtexec_benchmark_command(
         config, "end2end.engine"
@@ -1710,11 +1727,16 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
     if config.generate_plots:
         try:
             from .plots import generate_plots
+            _stage2 = max(1, min(int(config.stage2_epochs), int(config.epochs)))
+            _switch = max(1, int(config.epochs) - _stage2)
             plot_files = generate_plots(
                 run_dir=run_dir,
                 class_names=validation.class_names,
                 coco_val_ann=coco_annotations.get("val"),
                 model_name=config.model_name,
+                switch_epoch=_switch,
+                conf_thr=config.eval_conf_threshold,
+                iou_thr=config.eval_iou_threshold,
             )
             for p in plot_files:
                 print(f"Plot: {p}")

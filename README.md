@@ -84,13 +84,18 @@ paths:
 
 ### Python environment
 
-**Tested configuration:** Python 3.11 · CUDA 11.8 · PyTorch 2.1 · Windows (RTX 4090)
+**Tested configuration:** Python 3.10 · CUDA 12.6 · PyTorch 2.6 · Linux (Ubuntu 24.04, H100 NVL)
 
-> **Why CUDA 11.8 and not 12.x?**
-> OpenMMLab does not publish mmcv binary wheels for Windows on CUDA 12.x, so pip
-> would fall back to building from source (requires a full MSVC + CUDA toolchain).
-> CUDA 11.8 has pre-built Windows wheels and the RTX 4090 runs it without any
-> performance penalty.
+> **Why CUDA 12.6 and not 11.8?**
+> Modern datacenter GPUs (H100 and newer) need CUDA 12.x — the driver stack
+> for 11.8 doesn't support them. `requirements.txt` pins `torch==2.6.0+cu126`
+> and the matching `mmcv==2.2.0` wheel from the OpenMMLab CDN.
+>
+> On Windows, OpenMMLab does not publish mmcv wheels for every (Python, CUDA,
+> Torch) combination — check the index at the `--find-links` URL in
+> `requirements.txt` before installing, and pin an older combination
+> (e.g. `torch==2.2.2+cu118` / `mmcv==2.1.0`) if your triple isn't listed
+> rather than falling back to a source build.
 
 > **Why setuptools 68.2.2?**
 > PyTorch 2.1 imports `pkg_resources` from setuptools internally. That module was
@@ -408,7 +413,7 @@ All options live in `hyperparameter_config.yaml`. Inline comments explain each p
 | Key | Default | Description |
 |---|---|---|
 | `epochs` | `200` | Total training epochs. |
-| `stage2_epochs` | `20` | Final epochs without mosaic/mixup (fine-tuning phase). |
+| `stage2_epochs` | `35` | Final epochs without mosaic/mixup (fine-tuning phase). The pipeline switches from `CachedMosaic + CachedMixUp` to basic augmentation at epoch `epochs − stage2_epochs`. All stage-2 checkpoints are kept on disk for SWA averaging. |
 | `batch_size` | `32` | Training batch size. |
 | `val_batch_size` | `8` | Validation batch size. |
 | `workers` | `8` | DataLoader worker processes. |

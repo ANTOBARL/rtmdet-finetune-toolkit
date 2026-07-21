@@ -40,13 +40,21 @@ model:
 
 training:
   epochs: 300
-  stage2_epochs: 20
+  # Final epochs without mosaic/mixup (fine-tuning phase). All stage-2
+  # checkpoints are kept on disk, so a larger value gives the optional SWA
+  # step (tools/swa_checkpoint.py) more checkpoints to average.
+  stage2_epochs: 35
   batch_size: 32
   val_batch_size: 8
   workers: 8
   val_interval: 5
   base_lr: 0.001
-  device: 'cuda:0'
+  device: 'cuda'
+
+  # Number of GPUs to train on (uses torch.distributed.run when > 1).
+  # Clamped automatically to however many CUDA devices are actually visible.
+  num_gpus: 1
+
   seed: 1
 
   # Automatic Mixed Precision (recommended: true on modern GPUs).
@@ -88,6 +96,13 @@ pipeline:
   #   per_class_map50.png  — bar chart of mAP50 per class at the best epoch.
   #   confusion_matrix.png — row-normalised confusion matrix (only when run_evaluation: true).
   generate_plots: true
+
+  # Operating point used for the per-threshold P/R/F1 report and the
+  # confusion matrix (metrics/threshold_metrics.txt, plots/confusion_matrix.png).
+  # Independent from onnx_export.score_threshold/iou_threshold below, which
+  # are baked into the exported ONNX graph instead.
+  eval_conf_threshold: 0.25
+  eval_iou_threshold: 0.50
 
 
 onnx_export:

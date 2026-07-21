@@ -3,10 +3,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import warnings
+
 import yaml
 
 
 _CONFIG_FILENAME = "hyperparameter_config.yaml"
+
+
+def _clamp_num_gpus(requested: int) -> int:
+    try:
+        import torch
+        available = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    except Exception:
+        available = 0
+    available = max(available, 1)  # at least 1 for CPU/non-CUDA runs
+    if requested > available:
+        warnings.warn(
+            f"num_gpus={requested} requested but only {available} GPU(s) detected; "
+            f"clamping to {available}.",
+            stacklevel=3,
+        )
+        return available
+    return requested
 
 
 def _find_config_file(start: Path | None = None) -> Path:
@@ -71,13 +90,14 @@ def load_pipeline_config(config_path: Path | str | None = None) -> dict[str, Any
         "pretrained_checkpoint": _to_path(mdl.get("pretrained_checkpoint")),
         # ── training ─────────────────────────────────────────────────────────
         "epochs": int(tr.get("epochs", 200)),
-        "stage2_epochs": int(tr.get("stage2_epochs", 20)),
+        "stage2_epochs": int(tr.get("stage2_epochs", 35)),
         "batch_size": int(tr.get("batch_size", 32)),
         "val_batch_size": int(tr.get("val_batch_size", 8)),
         "workers": int(tr.get("workers", 8)),
         "val_interval": int(tr.get("val_interval", 5)),
         "base_lr": float(tr.get("base_lr", 0.001)),
-        "device": str(tr.get("device", "cuda:0")).strip(),
+        "device": str(tr.get("device", "cuda")).strip(),
+        "num_gpus": _clamp_num_gpus(int(tr.get("num_gpus", 1))),
         "seed": int(tr.get("seed", 1)),
         "amp": bool(tr.get("amp", True)),
         "resume": bool(tr.get("resume", False)),
@@ -92,6 +112,8 @@ def load_pipeline_config(config_path: Path | str | None = None) -> dict[str, Any
         "save_onnx_weights": bool(pl.get("save_onnx_weights", False)),
         "run_packaging": bool(pl.get("run_packaging", True)),
         "generate_plots": bool(pl.get("generate_plots", True)),
+        "eval_conf_threshold": float(pl.get("eval_conf_threshold", 0.25)),
+        "eval_iou_threshold": float(pl.get("eval_iou_threshold", 0.50)),
         # ── onnx export ──────────────────────────────────────────────────────
         "onnx_score_threshold": float(onnx.get("score_threshold", 0.05)),
         "onnx_iou_threshold": float(onnx.get("iou_threshold", 0.5)),

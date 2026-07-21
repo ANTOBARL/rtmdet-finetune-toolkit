@@ -50,6 +50,7 @@ def main() -> None:
         val_interval=cfg["val_interval"],
         base_lr=cfg["base_lr"],
         device=cfg["device"],
+        num_gpus=cfg["num_gpus"],
         seed=cfg["seed"],
         project_dir=cfg["project_dir"],
         package_dir=cfg["package_dir"],
@@ -77,6 +78,8 @@ def main() -> None:
         early_stopping_patience=cfg["early_stopping_patience"],
         early_stopping_min_delta=cfg["early_stopping_min_delta"],
         generate_plots=cfg["generate_plots"],
+        eval_conf_threshold=cfg["eval_conf_threshold"],
+        eval_iou_threshold=cfg["eval_iou_threshold"],
     )
 
     run_rtmdet_pipeline(pipeline_config)

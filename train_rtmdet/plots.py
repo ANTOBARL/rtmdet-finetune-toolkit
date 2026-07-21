@@ -85,11 +85,39 @@ def parse_training_log(run_dir: Path) -> tuple[list[dict], list[dict]]:
 
 # ── Training curves ───────────────────────────────────────────────────────────
 
+def _find_switch_iter(train_recs: list[dict], switch_epoch: int) -> int | None:
+    """Return the global iteration closest to the start of *switch_epoch*."""
+    if not train_recs:
+        return None
+    # Training records from MMEngine carry an 'epoch' field alongside 'step'.
+    for r in train_recs:
+        if r.get("epoch", -1) >= switch_epoch:
+            return int(r["step"])
+    # Fallback: linear estimate when epoch field is absent
+    max_step = max((r.get("step", 0) for r in train_recs), default=0)
+    max_ep = max((r.get("epoch", 0) for r in train_recs), default=0)
+    if max_ep > 0 and max_step > 0:
+        return int(switch_epoch * max_step / max_ep)
+    return None
+
+
+def _draw_switch_line(ax: Any, x: float | int, label: str = "Stage 2\n(no mosaic)") -> None:
+    """Draw a labelled vertical dashed line at *x* on *ax*."""
+    ax.axvline(x, color="dimgray", linestyle="--", linewidth=1.0, alpha=0.65, zorder=3)
+    ax.text(
+        x, 0.97, label,
+        transform=ax.get_xaxis_transform(),
+        ha="left", va="top", fontsize=6.5, color="dimgray",
+        bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.7),
+    )
+
+
 def plot_training_curves(
     train_recs: list[dict],
     val_recs: list[dict],
     out_path: Path,
     model_name: str = "",
+    switch_epoch: int | None = None,
 ) -> Path | None:
     """Save training curves to *out_path*. Returns the path, or None if no data."""
     if not train_recs and not val_recs:
@@ -113,6 +141,11 @@ def plot_training_curves(
     if n_plots == 0:
         return None
 
+    # Pre-compute switch iteration once for iter-based subplots
+    switch_iter: int | None = None
+    if switch_epoch is not None and train_recs:
+        switch_iter = _find_switch_iter(train_recs, switch_epoch)
+
     fig, axes = plt.subplots(n_plots, 1, figsize=(13, 4 * n_plots))
     if n_plots == 1:
         axes = [axes]
@@ -130,6 +163,8 @@ def plot_training_curves(
             if pairs:
                 xs, ys = zip(*pairs)
                 ax.plot(xs, ys, label=key, linewidth=2 if key == "loss" else 1, alpha=0.85)
+        if switch_iter is not None:
+            _draw_switch_line(ax, switch_iter)
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Loss")
         ax.set_title(f"{prefix}Training Loss")
@@ -155,6 +190,8 @@ def plot_training_curves(
                 xs, ys = zip(*pairs)
                 ax.plot(xs, ys, marker="o", markersize=3, label=label, color=color)
                 plotted_any = True
+        if switch_epoch is not None:
+            _draw_switch_line(ax, switch_epoch)
         if plotted_any:
             # Mark best epoch
             best_idx = max(range(len(val_recs)),
@@ -184,6 +221,8 @@ def plot_training_curves(
         if pairs:
             xs, ys = zip(*pairs)
             ax.plot(xs, ys, color="tab:purple", linewidth=1.2)
+        if switch_iter is not None:
+            _draw_switch_line(ax, switch_iter)
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Learning Rate")
         ax.set_title(f"{prefix}Learning Rate Schedule")
@@ -444,8 +483,10 @@ def generate_plots(
     model_name: str = "",
     iou_thr: float = 0.45,
     score_thr: float = 0.25,
+    switch_epoch: int | None = None,
+    conf_thr: float = 0.25,
 ) -> list[Path]:
-    """Generate all available plots for a training run.
+    """Generate all available plots and metrics reports for a training run.
 
     Always generated (if log exists):
       - plots/training_curves.png
@@ -453,6 +494,7 @@ def generate_plots(
 
     Generated when val_predictions.pkl + COCO annotation file are present:
       - plots/confusion_matrix.png
+      - metrics/threshold_metrics.txt   (P/R/F1/TP/FP/FN at conf_thr, iou_thr)
 
     Returns a list of paths to the files actually created.
     """
@@ -473,6 +515,7 @@ def generate_plots(
             train_recs, val_recs,
             plots_dir / "training_curves.png",
             model_name=model_name,
+            switch_epoch=switch_epoch,
         )
         if path:
             generated.append(path)
@@ -491,14 +534,29 @@ def generate_plots(
         try:
             gt = _load_coco_gt(coco_val_ann)
             preds = _load_predictions(pkl_path)
-            matrix = compute_confusion_matrix(preds, gt, len(class_names), iou_thr, score_thr)
+
+            # Confusion matrix uses iou_thr for matching and score_thr for filtering.
+            # Threshold metrics use conf_thr (deployment threshold) and iou_thr.
+            matrix_cm = compute_confusion_matrix(preds, gt, len(class_names), iou_thr, score_thr)
             path = plot_confusion_matrix(
-                matrix, class_names,
+                matrix_cm, class_names,
                 plots_dir / "confusion_matrix.png",
                 normalize=True,
             )
             generated.append(path)
+
+            # Per-threshold metrics at the deployment operating point
+            matrix_thr = compute_confusion_matrix(preds, gt, len(class_names), iou_thr, conf_thr)
+            num_images = len(gt)
+            from .metrics import threshold_metrics_from_matrix, format_threshold_report
+            thr_metrics = threshold_metrics_from_matrix(matrix_thr, class_names, num_images)
+            report = format_threshold_report(thr_metrics, class_names, conf_thr, iou_thr)
+            thr_path = run_dir / "metrics" / "threshold_metrics.txt"
+            thr_path.parent.mkdir(parents=True, exist_ok=True)
+            thr_path.write_text(report + "\n", encoding="utf-8")
+            generated.append(thr_path)
+
         except Exception as exc:
-            print(f"WARNING: confusion matrix generation failed: {exc}")
+            print(f"WARNING: post-eval metrics generation failed: {exc}")
 
     return generated
