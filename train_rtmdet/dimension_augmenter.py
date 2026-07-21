@@ -205,10 +205,17 @@ def collect_split_records(dataset_root: Path, split_label: str) -> list[SourceIm
     if not images_dir.is_dir():
         return []
 
+    image_paths = [
+        p
+        for p in sorted(images_dir.iterdir(), key=lambda p: p.name.lower())
+        if p.suffix.lower() in IMAGE_EXTENSIONS
+    ]
+    n_total = len(image_paths)
+    step = max(1, n_total // 100)
+    print(f"  [{split_label}] scanning {n_total:,} images")
+
     records: list[SourceImageRecord] = []
-    for image_path in sorted(images_dir.iterdir(), key=lambda p: p.name.lower()):
-        if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
+    for done, image_path in enumerate(image_paths, 1):
         label_path = labels_dir / f"{image_path.stem}.txt"
         lp = label_path if label_path.is_file() else None
         width, height = _load_image_size(image_path)
@@ -225,6 +232,10 @@ def collect_split_records(dataset_root: Path, split_label: str) -> list[SourceIm
                 size_counts=size_counts,
             )
         )
+        if done % step == 0 or done == n_total:
+            print(f"\r  {done:,}/{n_total:,}", end="", flush=True)
+    if n_total:
+        print()
     return records
 
 
@@ -561,7 +572,7 @@ def generate_augmented_dataset(
 
     if dst_root.exists():
         shutil.rmtree(dst_root)
-    shutil.copytree(src_root, dst_root)
+    _copytree_with_progress(src_root, dst_root)
 
     manifest: dict[str, object] = {
         "source_dataset": str(src_root),
@@ -733,6 +744,23 @@ def augment_split(
         result["final_class_distribution"] = _class_distribution_from_counts(class_counts)
 
     return result
+
+
+def _copytree_with_progress(src_root: Path, dst_root: Path) -> None:
+    files = [p for p in src_root.rglob("*") if p.is_file()]
+    n_total = len(files)
+    step = max(1, n_total // 100)
+    print(f"  copying {n_total:,} files from {src_root.name} to {dst_root.name}")
+
+    for done, src_path in enumerate(files, 1):
+        rel = src_path.relative_to(src_root)
+        dst_path = dst_root / rel
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dst_path)
+        if done % step == 0 or done == n_total:
+            print(f"\r  {done:,}/{n_total:,}", end="", flush=True)
+    if n_total:
+        print()
 
 
 def _clear_split_contents(images_dir: Path, labels_dir: Path) -> None:
