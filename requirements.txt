@@ -19,11 +19,11 @@
 # ==============================================================================
 
 
-# ── PyTorch GPU — CUDA 11.8 ───────────────────────────────────────────────────
---extra-index-url https://download.pytorch.org/whl/cu118
-torch==2.2.2+cu118
-torchvision==0.17.2+cu118
-torchaudio==2.2.2+cu118
+# ── PyTorch GPU — CUDA 12.6 ───────────────────────────────────────────────────
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.6.0+cu126
+torchvision==0.21.0+cu126
+torchaudio==2.6.0+cu126
 
 
 # ── OpenMMLab core ────────────────────────────────────────────────────────────
@@ -32,15 +32,15 @@ setuptools>=68.2.2,<70         # keep below 70 to avoid pkg_resources removal is
 
 # mmcv is not on PyPI as a Linux binary.  The wheel is served from the OpenMMLab CDN.
 # The find-links URL encodes the exact (CUDA, Torch) pair — keep in sync with torch above.
---find-links https://download.openmmlab.com/mmcv/dist/cu118/torch2.2.0/index.html
-mmcv==2.1.0
+--find-links https://download.openmmlab.com/mmcv/dist/cu126/torch2.6.0/index.html
+mmcv==2.2.0
 
 # mmdet is installed from the local clone in step 2 above.
 
 
 # ── ONNX export & validation ──────────────────────────────────────────────────
 onnx>=1.16.0
-onnxruntime-gpu==1.17.3   # last release supporting CUDA 11.8 + cuDNN 8 (>=1.18 needs CUDA 12)
+onnxruntime-gpu>=1.18.0   # CUDA 12.x support
 onnx-simplifier>=0.4.36   # graph simplification used during export
 
 
