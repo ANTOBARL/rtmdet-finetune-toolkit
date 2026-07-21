@@ -1477,6 +1477,7 @@ def package_model_artifacts(
     validation: DatasetValidationResult,
     mmdet_config: Path,
     checkpoint: Path | None,
+    weights_only_checkpoint: Path | None = None,
 ) -> Path:
     package_root = Path(config.package_dir).resolve() / config.model_name
     package_root.mkdir(parents=True, exist_ok=True)
@@ -1487,8 +1488,12 @@ def package_model_artifacts(
     with classes_path.open("w", encoding="utf-8") as stream:
         stream.write("\n".join(validation.class_names) + "\n")
 
-    if checkpoint and checkpoint.is_file():
-        shutil.copy2(checkpoint, package_root / checkpoint.name)
+    # Prefer the weights-only checkpoint: it's what a next fine-tune or a
+    # deployment would load, and unlike the full training-state checkpoint it
+    # doesn't hit PyTorch >= 2.6's weights_only=True default on load.
+    checkpoint_to_package = weights_only_checkpoint or checkpoint
+    if checkpoint_to_package and checkpoint_to_package.is_file():
+        shutil.copy2(checkpoint_to_package, package_root / checkpoint_to_package.name)
 
     export_dir = Path(config.project_dir).resolve() / config.model_name / "export"
     for artifact_name in ("end2end.onnx", "end2end.engine", "pipeline.json", "deploy.json"):
@@ -1506,7 +1511,7 @@ def package_model_artifacts(
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "source_dataset": str(validation.dataset_root),
         "mmdet_config": mmdet_config.name,
-        "checkpoint": checkpoint.name if checkpoint else None,
+        "checkpoint": checkpoint_to_package.name if checkpoint_to_package else None,
     }
     with (package_root / "metadata.json").open("w", encoding="utf-8") as stream:
         json.dump(metadata, stream, indent=2, ensure_ascii=True)
@@ -1595,6 +1600,7 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
             "package_root": package_root,
         }
 
+    weights_only_checkpoint: Path | None = None
     if config.run_training:
         verify_training_environment(config)
         train_command = build_train_command(config, mmdet_config)
@@ -1605,6 +1611,9 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
         checkpoint = find_latest_checkpoint(run_dir)
         if checkpoint:
             print(f"Selected checkpoint: {checkpoint}")
+            from .checkpoint_tools import extract_weights_only
+            weights_only_checkpoint = extract_weights_only(checkpoint)
+            print(f"Weights-only checkpoint: {weights_only_checkpoint}")
         else:
             print("WARNING: no checkpoint found after training.")
 
@@ -1679,7 +1688,9 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
             print(f"WARNING: plot generation failed: {exc}")
 
     if config.run_packaging:
-        package_root = package_model_artifacts(config, validation, mmdet_config, checkpoint)
+        package_root = package_model_artifacts(
+            config, validation, mmdet_config, checkpoint, weights_only_checkpoint
+        )
         print(f"Model package: {package_root}")
 
     return {
@@ -1688,6 +1699,7 @@ def run_rtmdet_pipeline(config: RTMDetPipelineConfig) -> dict[str, Path | None]:
         "manifest": manifest_path,
         "run_dir": run_dir,
         "checkpoint": checkpoint,
+        "weights_only_checkpoint": weights_only_checkpoint,
         "onnx_file": onnx_file,
         "package_root": package_root,
     }

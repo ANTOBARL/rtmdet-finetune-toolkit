@@ -283,6 +283,46 @@ models/rtmdet/<model_name>/                     ← packaged artifacts
 
 ---
 
+## Checkpoint formats
+
+MMEngine checkpoints come in two shapes, and the pipeline produces a third:
+
+| File | Contents | Size | Use for |
+|---|---|---|---|
+| `epoch_N.pth` | weights + optimizer state + LR scheduler + message_hub + meta | full (largest) | genuine `resume: true` — continuing an interrupted run with optimizer state intact |
+| `best_<metric>_epoch_N.pth` | weights + message_hub + meta (no optimizer/scheduler) | ~half of `epoch_N.pth` | evaluation, manual inspection |
+| `best_<metric>_epoch_N_weights_only.pth` | weights only | smallest | `model.pretrained_checkpoint` for a new fine-tune, packaging, deployment |
+
+The pipeline auto-generates the third file for the best checkpoint at the end of every training run
+(`train_rtmdet/checkpoint_tools.py::extract_weights_only`) and packages that one, not the raw
+`best_*.pth`. To do it manually for any other checkpoint (e.g. a specific `epoch_N.pth`):
+
+```bash
+python tools/extract_weights.py runs/rtmdet/<model_name>/checkpoints/epoch_120.pth
+```
+
+**Why this matters:** since PyTorch 2.6, `torch.load()` defaults to `weights_only=True`. MMEngine's
+`message_hub` — present in both `epoch_*.pth` and `best_*.pth` — carries a `HistoryBuffer` object that
+isn't on PyTorch's default safe-unpickling allowlist, so loading either of them as
+`model.pretrained_checkpoint` fails with:
+
+```
+_pickle.UnpicklingError: Weights only load failed. ...
+WeightsUnpickler error: Unsupported global: GLOBAL mmengine.logging.history_buffer.HistoryBuffer ...
+```
+
+The `*_weights_only.pth` file sidesteps this entirely — it only contains tensors, so it loads fine
+under the new default. Extracting it requires `torch.load(..., weights_only=False)` once, which is safe
+only because it's your own trusted checkpoint (never do this for a `.pth` from an untrusted source).
+
+This only affects `load_from` / `pretrained_checkpoint` (weights-only init). A genuine `resume: true`
+still needs the full `epoch_N.pth` with optimizer state — MMEngine's own `--resume` loading goes through
+the same `weights_only=True` default internally, so on PyTorch >= 2.6 it can hit the same error. There's
+no clean workaround for that case yet short of an MMEngine-side fix or explicitly allowlisting
+`HistoryBuffer` via `torch.serialization.add_safe_globals(...)` before training starts.
+
+---
+
 ## Dataset format
 
 The pipeline expects a YOLO-format dataset:
@@ -343,7 +383,7 @@ All options live in `hyperparameter_config.yaml`. Inline comments explain each p
 | `model_name` | `my_model_rtmdet_s_640` | Name used for the run folder and output package. |
 | `variant` | `s` | One of `tiny`, `s`, `m`, `l`, `x`. See model variants table above. |
 | `imgsz` | `640` | Input size in pixels. Must be a multiple of 32. |
-| `pretrained_checkpoint` | *(COCO official)* | Path to a custom `.pth` to start from instead of COCO weights. |
+| `pretrained_checkpoint` | *(COCO official)* | Path to a custom `.pth` to start from instead of COCO weights. Use a `*_weights_only.pth` file if it comes from a prior run of this pipeline — see "Checkpoint formats" above. |
 
 ### `training`
 
