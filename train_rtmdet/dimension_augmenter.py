@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import random
@@ -373,9 +374,54 @@ def select_target_bin(
     return max(positive, key=positive.get)
 
 
-def choose_candidate(
+def build_bin_candidates(
     records: list[SourceImageRecord],
-    target_bin: str,
+    cfg: SizeAugmenterConfig,
+) -> dict[str, list[tuple[SourceImageRecord, tuple[float, float], int]]]:
+    """Precompute, once per split, the static (non-usage-dependent) part of
+    candidate eligibility for each target size bin: whether a record can be
+    scaled toward that bin at all, its allowed scale range, and how many
+    "useful" source objects it contributes. This avoids recomputing these
+    values for every one of the up to `max_new_images` selection rounds.
+    """
+    bin_names = [name for name, _, _ in COCO_SIZE_BINS]
+    result: dict[str, list[tuple[SourceImageRecord, tuple[float, float], int]]] = {
+        name: [] for name in bin_names
+    }
+    for rec in records:
+        if cfg.skip_images_without_labels and not rec.annotations:
+            continue
+        for target_bin in bin_names:
+            scale_range = _candidate_scale_range(rec, target_bin, cfg)
+            if scale_range is None:
+                continue
+            useful_objects = _useful_source_objects(rec, target_bin)
+            if useful_objects <= 0:
+                continue
+            result[target_bin].append((rec, scale_range, useful_objects))
+    return result
+
+
+def compact_bin_candidates(
+    bin_candidates: dict[str, list[tuple[SourceImageRecord, tuple[float, float], int]]],
+    usage_counts: dict[Path, int],
+    max_copies_per_source_image: int,
+) -> None:
+    """Drop candidates that have already reached their copy limit, in place.
+
+    Called periodically (not every round) so the per-round scan shrinks as
+    source images get exhausted, without paying rebuild cost every time.
+    """
+    for target_bin, items in bin_candidates.items():
+        bin_candidates[target_bin] = [
+            item
+            for item in items
+            if usage_counts.get(item[0].image_path, 0) < max_copies_per_source_image
+        ]
+
+
+def choose_candidate(
+    candidates: list[tuple[SourceImageRecord, tuple[float, float], int]],
     cfg: SizeAugmenterConfig,
     usage_counts: dict[Path, int],
     rng: random.Random,
@@ -383,18 +429,8 @@ def choose_candidate(
 ) -> tuple[SourceImageRecord, float] | None:
     scored: list[tuple[float, SourceImageRecord, tuple[float, float]]] = []
 
-    for rec in records:
-        if cfg.skip_images_without_labels and not rec.annotations:
-            continue
+    for rec, scale_range, useful_objects in candidates:
         if usage_counts.get(rec.image_path, 0) >= cfg.max_copies_per_source_image:
-            continue
-
-        scale_range = _candidate_scale_range(rec, target_bin, cfg)
-        if scale_range is None:
-            continue
-
-        useful_objects = _useful_source_objects(rec, target_bin)
-        if useful_objects <= 0:
             continue
 
         score = float(useful_objects)
@@ -406,9 +442,9 @@ def choose_candidate(
     if not scored:
         return None
 
-    scored.sort(key=lambda item: item[0], reverse=True)
     top_k = min(25, len(scored))
-    _score, rec, scale_range = rng.choice(scored[:top_k])
+    top = heapq.nlargest(top_k, scored, key=lambda item: item[0])
+    _score, rec, scale_range = rng.choice(top)
     scale = rng.uniform(scale_range[0], scale_range[1])
     return rec, scale
 
@@ -648,6 +684,8 @@ def augment_split(
     generated = 0
     usage_counts: dict[Path, int] = {}
     accepted_samples: list[GeneratedSample] = []
+    bin_candidates = build_bin_candidates(records, cfg)
+    compact_every = 500
 
     last_progress_pct = -1
     if max_new_images > 0:
@@ -664,7 +702,7 @@ def augment_split(
             break
 
         choice = choose_candidate(
-            records, target_bin, cfg, usage_counts, rng,
+            bin_candidates[target_bin], cfg, usage_counts, rng,
             class_counts=class_counts if cfg.balance_classes else None,
         )
         if choice is None:
@@ -710,6 +748,8 @@ def augment_split(
                 class_counts[ann.class_id] = class_counts.get(ann.class_id, 0) + 1
 
         generated += 1
+        if generated % compact_every == 0:
+            compact_bin_candidates(bin_candidates, usage_counts, cfg.max_copies_per_source_image)
         last_progress_pct = _print_progress(
             generated, max_new_images, split_label, last_progress_pct
         )
