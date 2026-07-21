@@ -473,15 +473,26 @@ by a previous run.
 > The main `hyperparameter_config.yaml` is **not** read by this tool. All settings
 > are configured exclusively in `tools/export_onnx/export_config.yaml`.
 
+Edit `tools/export_onnx/export_config.yaml`: set `base_dir` to the folder holding your files, then
+point `files.checkpoint`, `files.mmdet_config`, and `files.sample_image` to filenames inside it (or
+to absolute paths, which ignore `base_dir`):
+
+```yaml
+base_dir: '/path/to/runs/rtmdet/<model_name>/checkpoints'
+files:
+  checkpoint: 'best_coco_bbox_mAP_epoch_N.pth'
+  mmdet_config: '../../_configs/<model_name>_rtmdet_s_<timestamp>.py'
+  sample_image: 'path/to/any/dataset/image.jpg'
+```
+
+Then run:
+
 ```bash
-# 1. Edit tools/export_onnx/export_config.yaml
-#    Set project_dir + model_name (or checkpoint_path directly).
-# 2. Run:
 python tools/export_onnx/export_onnx.py
 ```
 
-The script auto-detects the MMDetection config and input size from the run manifest
-(`rtmdet_pipeline_manifest.json`) in the checkpoint folder.
+Input size is inferred from the config filename (falls back to 640) unless `model.imgsz` is set
+explicitly. Output goes to `files.output_dir`, or `<base_dir>/export_onnx/` if left unset.
 
 ---
 

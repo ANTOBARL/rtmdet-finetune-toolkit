@@ -1,34 +1,33 @@
 """
-Standalone ONNX export — independent tool to convert an already-trained
-RTMDet checkpoint to ONNX without re-running the training pipeline.
+Standalone ONNX export — convert a trained RTMDet checkpoint to ONNX.
 
-Use this when you want to:
-  - Export a checkpoint with different NMS thresholds without retraining.
-  - Export a checkpoint that was produced by a previous training run.
-  - Re-export after changing score_threshold, iou_threshold, or keep_top_k.
+This script is fully independent from the training pipeline.
 
-All parameters are read from export_config.yaml in the same directory.
-
-Output files:
-  end2end.onnx   — full model with NMS baked in
-  pipeline.json  — pre/post-processing metadata
-  deploy.json    — backend metadata
+Requirements (all set in export_config.yaml):
+  base_dir          — folder containing the model files
+  files.checkpoint  — .pth checkpoint filename (or absolute path)
+  files.mmdet_config — MMDetection .py config filename (or absolute path)
+  files.sample_image — any image from the dataset (or absolute path)
+  paths.mmdeploy_root — path to the MMDeploy clone
 
 Usage:
-  1. Edit export_config.yaml (set checkpoint_path or project_dir + model_name).
-  2. python export_onnx.py
+  1. Edit export_config.yaml
+  2. python tools/export_onnx/export_onnx.py
+
+Output (inside files.output_dir, default: <base_dir>/export_onnx/):
+  end2end.onnx   — model with NMS baked in
+  pipeline.json  — pre/post-processing metadata
+  deploy.json    — backend metadata
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-# Repo root is 3 levels up: export_onnx/ → tools/ → repo root
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_FILE = Path(__file__).resolve().parent / "export_config.yaml"
 
@@ -38,7 +37,7 @@ from train_rtmdet.export.onnx import run_onnx_export, validate_onnx
 
 
 # ---------------------------------------------------------------------------
-# Config loading
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _load_config() -> dict[str, Any]:
@@ -54,95 +53,28 @@ def _to_path(value: Any) -> Path | None:
     return Path(str(value)).expanduser()
 
 
-# ---------------------------------------------------------------------------
-# Path resolution helpers
-# ---------------------------------------------------------------------------
-
-def _find_manifest(checkpoint_file: Path) -> Path | None:
-    candidate = checkpoint_file.parent / "rtmdet_pipeline_manifest.json"
-    return candidate if candidate.is_file() else None
-
-
-def _load_manifest(path: Path | None) -> dict | None:
-    if path is None:
+def _resolve(filename: Any, base_dir: Path | None) -> Path | None:
+    """Resolve a filename against base_dir.
+    If filename is already absolute, base_dir is ignored.
+    Returns None if filename is null/empty.
+    """
+    p = _to_path(filename)
+    if p is None:
         return None
-    with path.open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+    if p.is_absolute():
+        return p.resolve()
+    if base_dir is None:
+        raise ValueError(
+            f"Cannot resolve relative path '{p}' — base_dir is not set in export_config.yaml."
+        )
+    return (base_dir / p).resolve()
 
 
-def _infer_config_path(checkpoint_file: Path, manifest: dict | None) -> Path:
-    if manifest:
-        raw = manifest.get("mmdet_config")
-        if raw:
-            p = Path(raw)
-            if p.is_file():
-                return p.resolve()
-
-    candidates = sorted(checkpoint_file.parent.glob("*.py"))
-    if len(candidates) == 1:
-        return candidates[0].resolve()
-
-    configs_dir = checkpoint_file.parent.parent / "_configs"
-    if configs_dir.is_dir():
-        candidates = sorted(configs_dir.glob("*.py"))
-        if candidates:
-            return max(candidates, key=lambda x: x.stat().st_mtime).resolve()
-
-    raise FileNotFoundError(
-        "MMDetection config not found automatically.\n"
-        "Check that checkpoint_path points to a valid training run folder."
-    )
-
-
-def _infer_imgsz(config_file: Path, manifest: dict | None, fallback: int = 640) -> int:
-    if manifest:
-        raw = manifest.get("config", {}).get("imgsz")
-        if raw not in (None, "None"):
-            return int(raw)
+def _infer_imgsz(config_file: Path, fallback: int = 640) -> int:
     for part in config_file.stem.split("_"):
         if part.isdigit() and int(part) >= 128:
             return int(part)
     return fallback
-
-
-def _find_best_checkpoint(project_dir: Path, model_name: str) -> Path:
-    run_dir = project_dir / model_name
-    candidates = sorted(run_dir.glob("best_coco_bbox_mAP_*.pth"))
-    if not candidates:
-        raise FileNotFoundError(
-            f"No best checkpoint found in {run_dir}.\n"
-            "Set checkpoint_path in export_config.yaml."
-        )
-    return max(candidates, key=lambda p: p.stat().st_mtime).resolve()
-
-
-def _find_sample_image(manifest: dict | None, checkpoint_file: Path) -> Path:
-    search_roots: list[Path] = []
-    if manifest:
-        dr = manifest.get("dataset_root")
-        if dr:
-            search_roots.append(Path(dr))
-    search_roots += [REPO_ROOT / "datasets", checkpoint_file.parent, REPO_ROOT]
-
-    for root in search_roots:
-        if not root.is_dir():
-            continue
-        for split in ("val", "valid", "test", "train"):
-            for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp"):
-                imgs = sorted((root / split / "images").glob(ext))
-                if not imgs:
-                    imgs = sorted((root / split).glob(ext))
-                if imgs:
-                    return imgs[0].resolve()
-        for ext in ("*.jpg", "*.jpeg", "*.png"):
-            imgs = sorted(root.glob(ext))
-            if imgs:
-                return imgs[0].resolve()
-
-    raise FileNotFoundError(
-        "Cannot find a sample image for MMDeploy.\n"
-        "Set sample_image in export_config.yaml under [paths]."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -151,58 +83,62 @@ def _find_sample_image(manifest: dict | None, checkpoint_file: Path) -> Path:
 
 def main() -> None:
     cfg = _load_config()
-
-    chk = cfg.get("checkpoint", {})
+    files_cfg = cfg.get("files", {})
     mdl = cfg.get("model", {})
     onnx_cfg = cfg.get("onnx", {})
     paths_cfg = cfg.get("paths", {})
-    out_cfg = cfg.get("output", {})
 
-    # ── checkpoint ────────────────────────────────────────────────────────────
-    checkpoint_path = _to_path(chk.get("checkpoint_path"))
-    if checkpoint_path:
-        checkpoint_file = checkpoint_path.resolve()
-    else:
-        project_dir = _to_path(chk.get("project_dir"))
-        model_name = chk.get("model_name")
-        if not project_dir or not model_name:
-            raise ValueError(
-                "Set checkpoint_path (or both project_dir + model_name) in export_config.yaml."
-            )
-        checkpoint_file = _find_best_checkpoint(project_dir, str(model_name))
+    base_dir = _to_path(cfg.get("base_dir"))
+    if base_dir:
+        base_dir = base_dir.resolve()
 
+    # ── 4 required files ──────────────────────────────────────────────────────
+
+    # 1. Checkpoint
+    checkpoint_file = _resolve(files_cfg.get("checkpoint"), base_dir)
+    if not checkpoint_file:
+        raise ValueError("files.checkpoint is not set in export_config.yaml.")
     if not checkpoint_file.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_file}")
 
-    # ── manifest + auto-detection ─────────────────────────────────────────────
-    manifest = _load_manifest(_find_manifest(checkpoint_file))
-    mmdet_config = _infer_config_path(checkpoint_file, manifest)
+    # 2. MMDetection config
+    mmdet_config = _resolve(files_cfg.get("mmdet_config"), base_dir)
+    if not mmdet_config:
+        raise ValueError("files.mmdet_config is not set in export_config.yaml.")
+    if not mmdet_config.is_file():
+        raise FileNotFoundError(f"MMDetection config not found: {mmdet_config}")
 
+    # 3. Sample image
+    sample_image = _resolve(files_cfg.get("sample_image"), base_dir)
+    if not sample_image:
+        raise ValueError("files.sample_image is not set in export_config.yaml.")
+    if not sample_image.is_file():
+        raise FileNotFoundError(f"Sample image not found: {sample_image}")
+
+    # 4. Output dir
+    output_raw = _resolve(files_cfg.get("output_dir"), base_dir)
+    output_dir = output_raw if output_raw else (
+        (base_dir / "export_onnx") if base_dir
+        else (checkpoint_file.parent / "export_onnx")
+    ).resolve()
+
+    # ── optional paths ────────────────────────────────────────────────────────
+    mmdeploy_root_raw = _to_path(paths_cfg.get("mmdeploy_root"))
+    mmdeploy_root = (
+        mmdeploy_root_raw.resolve() if mmdeploy_root_raw
+        else (REPO_ROOT / "mmdeploy").resolve()
+    )
+
+    mmdet_root_raw = _to_path(paths_cfg.get("mmdet_root"))
+    mmdet_root = mmdet_root_raw.resolve() if (mmdet_root_raw and mmdet_root_raw.is_dir()) else None
+
+    # ── model / onnx params ───────────────────────────────────────────────────
     imgsz_override = mdl.get("imgsz")
-    resolved_imgsz = int(imgsz_override) if imgsz_override else _infer_imgsz(mmdet_config, manifest)
-
-    sample_image_cfg = _to_path(paths_cfg.get("sample_image"))
-    sample_image = (
-        sample_image_cfg.resolve() if sample_image_cfg
-        else _find_sample_image(manifest, checkpoint_file)
-    )
-
-    work_dir_cfg = _to_path(out_cfg.get("work_dir"))
-    output_dir = (
-        work_dir_cfg.resolve() if work_dir_cfg
-        else (checkpoint_file.parent / "export_onnx").resolve()
-    )
-
-    mmdeploy_root_cfg = _to_path(paths_cfg.get("mmdeploy_root"))
-    mmdeploy_root = mmdeploy_root_cfg.resolve() if mmdeploy_root_cfg else REPO_ROOT / "mmdeploy"
-
-    mmdet_root_cfg = _to_path(paths_cfg.get("mmdet_root"))
-    mmdet_root = mmdet_root_cfg.resolve() if (mmdet_root_cfg and mmdet_root_cfg.is_dir()) else None
-
+    resolved_imgsz = int(imgsz_override) if imgsz_override else _infer_imgsz(mmdet_config)
     device = str(mdl.get("device", "cuda:0")).strip()
     score_threshold = float(onnx_cfg.get("score_threshold", 0.05))
     iou_threshold = float(onnx_cfg.get("iou_threshold", 0.5))
-    keep_top_k = int(onnx_cfg.get("keep_top_k", 300))
+    keep_top_k = int(onnx_cfg.get("keep_top_k", 10))
     do_validate = bool(onnx_cfg.get("validate", True))
 
     # ── summary ───────────────────────────────────────────────────────────────
