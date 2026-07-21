@@ -3,8 +3,10 @@ from __future__ import annotations
 import heapq
 import json
 import math
+import os
 import random
 import shutil
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -420,13 +422,25 @@ def compact_bin_candidates(
         ]
 
 
-def choose_candidate(
+CANDIDATE_CACHE_SIZE = 200
+CANDIDATE_CACHE_REFRESH_INTERVAL = 50
+
+
+def _score_candidates(
     candidates: list[tuple[SourceImageRecord, tuple[float, float], int]],
     cfg: SizeAugmenterConfig,
     usage_counts: dict[Path, int],
     rng: random.Random,
-    class_counts: dict[int, int] | None = None,
-) -> tuple[SourceImageRecord, float] | None:
+    class_counts: dict[int, int] | None,
+    limit: int,
+) -> list[tuple[float, SourceImageRecord, tuple[float, float]]]:
+    """Full O(candidates) scoring pass, kept out of the hot per-image path.
+
+    Scores every eligible candidate (this is the expensive part when class
+    balancing is on, since it walks every annotation of every candidate) and
+    returns only the top `limit` — the caller keeps this as a short-lived
+    cache instead of rescoring everything for each generated image.
+    """
     scored: list[tuple[float, SourceImageRecord, tuple[float, float]]] = []
 
     for rec, scale_range, useful_objects in candidates:
@@ -440,11 +454,40 @@ def choose_candidate(
         scored.append((score, rec, scale_range))
 
     if not scored:
+        return []
+
+    limit = min(limit, len(scored))
+    return heapq.nlargest(limit, scored, key=lambda item: item[0])
+
+
+def choose_candidate(
+    candidates: list[tuple[SourceImageRecord, tuple[float, float], int]],
+    cfg: SizeAugmenterConfig,
+    usage_counts: dict[Path, int],
+    rng: random.Random,
+    cache: list[tuple[float, SourceImageRecord, tuple[float, float]]],
+    class_counts: dict[int, int] | None = None,
+) -> tuple[SourceImageRecord, float] | None:
+    """Pick a candidate from `cache`, refilling it from `candidates` (an
+    O(candidates) scan) only when it runs dry — see CANDIDATE_CACHE_*.
+    """
+    cache[:] = [
+        item
+        for item in cache
+        if usage_counts.get(item[1].image_path, 0) < cfg.max_copies_per_source_image
+    ]
+    if not cache:
+        cache.extend(
+            _score_candidates(
+                candidates, cfg, usage_counts, rng, class_counts,
+                limit=CANDIDATE_CACHE_SIZE,
+            )
+        )
+    if not cache:
         return None
 
-    top_k = min(25, len(scored))
-    top = heapq.nlargest(top_k, scored, key=lambda item: item[0])
-    _score, rec, scale_range = rng.choice(top)
+    top_k = min(25, len(cache))
+    _score, rec, scale_range = rng.choice(cache[:top_k])
     scale = rng.uniform(scale_range[0], scale_range[1])
     return rec, scale
 
@@ -686,11 +729,19 @@ def augment_split(
     accepted_samples: list[GeneratedSample] = []
     bin_candidates = build_bin_candidates(records, cfg)
     compact_every = 500
+    write_workers = min(8, os.cpu_count() or 4)
+    write_futures: list[Future] = []
+
+    bin_caches: dict[str, list[tuple[float, SourceImageRecord, tuple[float, float]]]] = {
+        name: [] for name in bin_candidates
+    }
+    bin_draws_since_refresh: dict[str, int] = {name: 0 for name in bin_candidates}
 
     last_progress_pct = -1
     if max_new_images > 0:
         last_progress_pct = _print_progress(0, max_new_images, split_label, last_progress_pct)
 
+    executor = ThreadPoolExecutor(max_workers=write_workers)
     while generated < max_new_images:
         if cfg.stop_when_within_tolerance and within_tolerance(
             current_counts, cfg.target_distribution, cfg.tolerance
@@ -701,10 +752,18 @@ def augment_split(
         if target_bin is None:
             break
 
+        # force a rescore periodically so the class-balance cache doesn't
+        # drift too far from the true (fast-changing) class distribution
+        if bin_draws_since_refresh[target_bin] >= CANDIDATE_CACHE_REFRESH_INTERVAL:
+            bin_caches[target_bin] = []
+            bin_draws_since_refresh[target_bin] = 0
+
         choice = choose_candidate(
             bin_candidates[target_bin], cfg, usage_counts, rng,
+            bin_caches[target_bin],
             class_counts=class_counts if cfg.balance_classes else None,
         )
+        bin_draws_since_refresh[target_bin] += 1
         if choice is None:
             break
         source, scale = choice
@@ -738,7 +797,9 @@ def augment_split(
             annotations=transformed,
             size_counts=size_counts,
         )
-        _write_generated_sample(sample, images_dir, labels_dir, cfg)
+        write_futures.append(
+            executor.submit(_write_generated_sample, sample, images_dir, labels_dir, cfg)
+        )
         accepted_samples.append(sample)
         current_counts = [a + b for a, b in zip(current_counts, size_counts)]
 
@@ -756,6 +817,25 @@ def augment_split(
 
     if max_new_images > 0:
         print()
+
+    n_writes = len(write_futures)
+    if n_writes:
+        last_write_pct = -1
+        for done, future in enumerate(write_futures, 1):
+            future.result()
+            step = max(1, n_writes // 100)
+            if done % step == 0 or done == n_writes:
+                pct = done / n_writes
+                width = 28
+                filled = min(width, int(width * pct))
+                bar = "#" * filled + "." * (width - filled)
+                print(
+                    f"\r[{split_label}] writing {done}/{n_writes} [{bar}] {pct:5.1%}",
+                    end="",
+                    flush=True,
+                )
+        print()
+    executor.shutdown(wait=True)
 
     final_distribution = distribution_from_counts(current_counts)
     result: dict[str, object] = {
