@@ -233,3 +233,6 @@ hyperparameter_config.yaml
 
 # personal config (contains local paths) — copy from dataset_workflow_config.template.yaml
 dataset_workflow_config.yaml
+
+# personal config (contains local paths) — copy from export_config.template.yaml
+tools/export_onnx/export_config.yaml

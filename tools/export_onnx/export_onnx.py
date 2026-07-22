@@ -4,10 +4,13 @@ Standalone ONNX export — convert a trained RTMDet checkpoint to ONNX.
 This script is fully independent from the training pipeline.
 
 Requirements (all set in export_config.yaml):
-  base_dir          — folder containing the model files
+  base_dir          — folder containing the checkpoint + mmdet config
   files.checkpoint  — .pth checkpoint filename (or absolute path)
   files.mmdet_config — MMDetection .py config filename (or absolute path)
-  files.sample_image — any image from the dataset (or absolute path)
+  files.sample_image — any image, used only to trace the ONNX graph — resolved
+                        against this script's own folder (tools/export_onnx/),
+                        not base_dir, so one fixed image works for every export
+                        (or absolute path, for a different image per export)
   paths.mmdeploy_root — path to the MMDeploy clone
 
 Usage:
@@ -117,8 +120,10 @@ def main() -> None:
     if not mmdet_config.is_file():
         raise FileNotFoundError(f"MMDetection config not found: {mmdet_config}")
 
-    # 3. Sample image
-    sample_image = _resolve(files_cfg.get("sample_image"), base_dir)
+    # 3. Sample image — resolved against this script's own folder, not base_dir,
+    # since it's only used to trace the ONNX graph and doesn't change per run
+    # (unlike the checkpoint/config, which live wherever that run's output went).
+    sample_image = _resolve(files_cfg.get("sample_image"), CONFIG_FILE.parent)
     if not sample_image:
         raise ValueError("files.sample_image is not set in export_config.yaml.")
     if not sample_image.is_file():

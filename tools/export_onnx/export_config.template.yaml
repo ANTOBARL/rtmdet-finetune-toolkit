@@ -1,6 +1,9 @@
 # =============================================================================
-# ONNX Export Configuration
-# Edit this file, then run:
+# ONNX Export Configuration — TEMPLATE
+# Copy this file to export_config.yaml and fill in your paths:
+#   cp export_config.template.yaml export_config.yaml
+#
+# Edit export_config.yaml, then run:
 #   python tools/export_onnx/export_onnx.py
 # =============================================================================
 
@@ -18,8 +21,11 @@ files:
   # (typically in runs/rtmdet/_configs/<model_name>_rtmdet_*.py)
   mmdet_config: '..\..\_configs\<model_name>_rtmdet_s_<timestamp>.py'
 
-  # Any image from the dataset — used by MMDeploy to trace the graph
-  sample_image: 'C:\path\to\dataset\valid\images\example.jpg'
+  # Any image from the dataset — used by MMDeploy to trace the graph.
+  # Resolved against this folder (tools/export_onnx/), NOT base_dir — drop a
+  # fixed image next to this file once and forget about it. Use an absolute
+  # path here instead if you want a different image per export.
+  sample_image: 'img.jpg'
 
   # Output subfolder for end2end.onnx and metadata
   # Default (when null): <base_dir>/export_onnx/
@@ -27,7 +33,8 @@ files:
 
 
 model:
-  # Input image size in pixels. Leave null to auto-detect from the mmdet config filename.
+  # Input image size in pixels. Leave null to auto-detect from the mmdet
+  # config's test_pipeline Resize transform.
   imgsz: ~
   device: "cuda:0"
 

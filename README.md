@@ -482,8 +482,8 @@ by a previous run.
 > The main `hyperparameter_config.yaml` is **not** read by this tool. All settings
 > are configured exclusively in `tools/export_onnx/export_config.yaml`.
 
-Edit `tools/export_onnx/export_config.yaml`: set `base_dir` to the folder holding your files, then
-point `files.checkpoint`, `files.mmdet_config`, and `files.sample_image` to filenames inside it (or
+Edit `tools/export_onnx/export_config.yaml`: set `base_dir` to the folder holding your checkpoint
+and mmdet config, then point `files.checkpoint` and `files.mmdet_config` to filenames inside it (or
 to absolute paths, which ignore `base_dir`):
 
 ```yaml
@@ -491,8 +491,12 @@ base_dir: '/path/to/runs/rtmdet/<model_name>/checkpoints'
 files:
   checkpoint: 'best_coco_bbox_mAP_epoch_N.pth'
   mmdet_config: '../../_configs/<model_name>_rtmdet_s_<timestamp>.py'
-  sample_image: 'path/to/any/dataset/image.jpg'
+  sample_image: 'img.jpg'
 ```
+
+`files.sample_image` is different: it's only used to trace the ONNX graph, so it's resolved against
+`tools/export_onnx/` (this script's own folder) instead of `base_dir` — drop one fixed image there
+once and every export reuses it. Use an absolute path instead if you want a different image per run.
 
 Then run:
 
