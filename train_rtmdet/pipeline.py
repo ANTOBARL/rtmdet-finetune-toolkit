@@ -115,6 +115,7 @@ class RTMDetPipelineConfig:
     pretrained_checkpoint: str | Path | None = None
     class_names: list[str] | None = None
     nc: int | None = None
+    class_weights: list[float] | None = None
     normalize_names: bool = False
     convert_segments_to_boxes: bool = True
     stop_on_validation_errors: bool = True
@@ -883,6 +884,41 @@ def tidy_checkpoints_dir(run_dir: Path) -> None:
             shutil.move(str(entry), str(logs_dir / entry.name))
 
 
+def _validate_class_weights(
+    config: RTMDetPipelineConfig, validation: DatasetValidationResult
+) -> None:
+    if config.class_weights is None:
+        return
+    n_classes = len(validation.class_names)
+    n_weights = len(config.class_weights)
+    if n_weights != n_classes:
+        raise ValueError(
+            f"training.class_weights has {n_weights} entries but the dataset has "
+            f"{n_classes} classes ({', '.join(validation.class_names)}). "
+            "Provide one weight per class, in the same order as class_names."
+        )
+    if any(w < 0 for w in config.class_weights):
+        raise ValueError("training.class_weights entries must be >= 0.")
+
+
+def _build_custom_imports_block(config: RTMDetPipelineConfig) -> str:
+    if config.class_weights is None:
+        return ""
+    return "custom_imports = dict(imports=['train_rtmdet.losses'], allow_failed_imports=False)\n"
+
+
+def _build_loss_cls_block(config: RTMDetPipelineConfig) -> str:
+    if config.class_weights is None:
+        return ""
+    weights = [float(w) for w in config.class_weights]
+    return (
+        f"        loss_cls=dict(\n"
+        f"            type='QualityFocalLossClassWeighted',\n"
+        f"            class_weight={weights!r},\n"
+        f"        ),\n"
+    )
+
+
 def generate_mmdet_config(
     config: RTMDetPipelineConfig,
     validation: DatasetValidationResult,
@@ -906,6 +942,8 @@ def generate_mmdet_config(
         else validation.split_dirs["val"].name
     )
 
+    _validate_class_weights(config, validation)
+
     class_tuple = tuple(validation.class_names)
     metainfo = {"classes": class_tuple}
     max_epochs = int(config.epochs)
@@ -919,7 +957,7 @@ def generate_mmdet_config(
 # Source dataset: {dataset_root}
 
 _base_ = {resolve_base_config(config)!r}
-
+{_build_custom_imports_block(config)}
 data_root = {str(dataset_root).replace(chr(92), '/') + '/'!r}
 metainfo = {pformat(metainfo, width=100)}
 num_classes = {len(validation.class_names)}
@@ -933,7 +971,9 @@ resume = {bool(config.resume)!r}
 randomness = dict(seed={int(config.seed)}, deterministic=False)
 
 model = dict(
-    bbox_head=dict(num_classes=num_classes),
+    bbox_head=dict(
+        num_classes=num_classes,
+{_build_loss_cls_block(config)}    ),
 )
 {build_pipeline_block(int(config.imgsz))}
 train_dataloader = dict(
@@ -1109,9 +1149,17 @@ def run_command(command: list, cwd=None) -> None:
         print(f"Working directory: {cwd}")
 
     env = os.environ.copy()
+    # Repo root (parent of the train_rtmdet package) always goes first, so
+    # mmdet subprocesses can `import train_rtmdet.losses` — needed to resolve
+    # custom_imports for class-weighted training — regardless of `cwd`.
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    pythonpath_parts = [repo_root]
     if cwd:
-        old_pythonpath = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = str(cwd) + (os.pathsep + old_pythonpath if old_pythonpath else "")
+        pythonpath_parts.append(str(cwd))
+    old_pythonpath = env.get("PYTHONPATH", "")
+    if old_pythonpath:
+        pythonpath_parts.append(old_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
 
     proc = subprocess.Popen(
         command,

@@ -74,6 +74,16 @@ training:
   early_stopping_patience: 20
   early_stopping_min_delta: 0.001
 
+  # Optional: per-class weight for the classification loss, to counter class
+  # imbalance. One entry per class, same order as dataset.class_names (or
+  # data.yaml if class_names is left empty). Leave empty ([]) to disable —
+  # this is the default and matches stock RTMDet behavior.
+  # Run `python balance_dataset.py` to get suggested weights (inverse class
+  # frequency, normalized so the most common class = 1.0) printed in this
+  # exact format, ready to paste in.
+  # Example for 3 classes: [1.0, 4.2, 12.7]
+  class_weights: []
+
 
 pipeline:
   # true  → validate dataset and generate config only; do NOT start training.

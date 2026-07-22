@@ -78,6 +78,13 @@ def load_pipeline_config(config_path: Path | str | None = None) -> dict[str, Any
     project_dir_raw = _to_path(paths.get("project_dir"))
     package_dir_raw = _to_path(paths.get("package_dir"))
 
+    # class_weights: optional list of floats, one per class in class_names order.
+    class_weights_raw = tr.get("class_weights")
+    if isinstance(class_weights_raw, list) and class_weights_raw:
+        class_weights = [float(w) for w in class_weights_raw]
+    else:
+        class_weights = None
+
     return {
         # ── dataset ──────────────────────────────────────────────────────────
         "dataset_path": _to_path(ds.get("dataset_path")),
@@ -105,6 +112,7 @@ def load_pipeline_config(config_path: Path | str | None = None) -> dict[str, Any
         "early_stopping": bool(tr.get("early_stopping", False)),
         "early_stopping_patience": int(tr.get("early_stopping_patience", 20)),
         "early_stopping_min_delta": float(tr.get("early_stopping_min_delta", 0.001)),
+        "class_weights": class_weights,
         # ── pipeline ─────────────────────────────────────────────────────────
         "prepare_only": bool(pl.get("prepare_only", False)),
         "run_training": bool(pl.get("run_training", True)),

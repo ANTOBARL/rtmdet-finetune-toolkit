@@ -59,6 +59,7 @@ def main() -> None:
         pretrained_checkpoint=cfg["pretrained_checkpoint"],
         class_names=cfg["class_names"],
         nc=cfg["nc"],
+        class_weights=cfg["class_weights"],
         normalize_names=cfg["normalize_names"],
         convert_segments_to_boxes=cfg["convert_segments_to_boxes"],
         stop_on_validation_errors=cfg["stop_on_validation_errors"],
