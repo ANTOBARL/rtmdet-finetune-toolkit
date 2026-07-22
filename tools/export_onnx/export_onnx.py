@@ -22,6 +22,7 @@ Output (inside files.output_dir, default: <base_dir>/export_onnx/):
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -71,9 +72,17 @@ def _resolve(filename: Any, base_dir: Path | None) -> Path | None:
 
 
 def _infer_imgsz(config_file: Path, fallback: int = 640) -> int:
-    for part in config_file.stem.split("_"):
-        if part.isdigit() and int(part) >= 128:
-            return int(part)
+    """Read the input size from the config's test_pipeline Resize transform.
+
+    Generated configs always contain `dict(type='Resize', scale=(N, N), ...)`
+    (see build_pipeline_block in train_rtmdet/pipeline.py) — read that instead
+    of guessing from the filename, which also contains an 8-digit YYYYMMDD
+    timestamp that trivially (and wrongly) looks like a valid size.
+    """
+    text = config_file.read_text(encoding="utf-8")
+    match = re.search(r"type='Resize',\s*scale=\((\d+),\s*(\d+)\)", text)
+    if match:
+        return int(match.group(1))
     return fallback
 
 
